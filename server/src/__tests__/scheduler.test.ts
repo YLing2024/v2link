@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Scheduler } from '../services/scheduler.js'
 import type { XrayClient } from '../services/xrayClient.js'
-import { makeRepo, makeTestDb } from './helpers.js'
+import { makeMonitor, makeRepo, makeTestDb } from './helpers.js'
 
 // Scheduler 单测：
 //   · 过期扫描：active 且到期 → rmu + expired
 //   · rmu 失败 → 本轮跳过（保持 active），不抛
 //   · 账本首拉语义：首次不 reset、值丢弃；第二次起 reset + 累加
 //   · 未知 email（数据面残留）不凭空累计
+//   · 账本轮同时写 traffic_samples（A 层）；连接/采样保留清理（7 天 / 30 天滚动）
 
 function stubXray(overrides?: Partial<XrayClient>): XrayClient {
   return {
@@ -36,19 +37,29 @@ function makeScheduler(overrides?: {
   now?: () => number
   expireIntervalMs?: number
   ledgerIntervalMs?: number
+  connCleanupIntervalMs?: number
+  sampleCleanupIntervalMs?: number
+  connRetentionMs?: number
+  sampleRetentionMs?: number
 }) {
   const db = makeTestDb()
   const repo = makeRepo(db)
+  const monitor = makeMonitor(db)
   const sched = new Scheduler({
     db,
     repo,
+    monitor,
     xray: overrides?.xray ?? stubXray(),
     logger: () => undefined,
     now: overrides?.now ?? (() => 1_800_000_000_000),
     expireIntervalMs: overrides?.expireIntervalMs ?? 15_000,
     ledgerIntervalMs: overrides?.ledgerIntervalMs ?? 30_000,
+    connCleanupIntervalMs: overrides?.connCleanupIntervalMs ?? 60_000,
+    sampleCleanupIntervalMs: overrides?.sampleCleanupIntervalMs ?? 86_400_000,
+    connRetentionMs: overrides?.connRetentionMs ?? 7 * 86_400_000,
+    sampleRetentionMs: overrides?.sampleRetentionMs ?? 30 * 86_400_000,
   })
-  return { db, repo, sched }
+  return { db, repo, monitor, sched }
 }
 
 async function seed(
@@ -146,5 +157,61 @@ describe('流量账本', () => {
       up_bytes: number
     }
     expect(row.up_bytes).toBe(0)
+  })
+
+  it('账本轮把 delta 写进 traffic_samples（采样 ts=当前轮时间）', async () => {
+    const queryTraffic = vi
+      .fn()
+      .mockResolvedValueOnce('{}')
+      .mockResolvedValueOnce(traffic({ lk_aaa: { up: 10, down: 20 } }))
+    const xray = stubXray({ queryTraffic })
+    const { db, sched } = makeScheduler({ xray, now: () => 1_800_000_123_000 })
+    seed(db, { id: 'lk_aaa' })
+    await sched.collectTraffic() // 预热
+    const res = await sched.collectTraffic()
+    expect(res.applied).toBe(1)
+    expect(res.sampleRows).toBe(1)
+    const samples = db
+      .prepare('SELECT * FROM traffic_samples')
+      .all() as { link_id: string; ts: number; up_delta: number; down_delta: number }[]
+    expect(samples).toHaveLength(1)
+    expect(samples[0]).toMatchObject({
+      link_id: 'lk_aaa',
+      ts: 1_800_000_123_000,
+      up_delta: 10,
+      down_delta: 20,
+    })
+  })
+})
+
+describe('保留清理（A/B 滚动）', () => {
+  it('cleanupConnections 只删 7 天前的行', async () => {
+    const { db, sched } = makeScheduler({ now: () => 2_000_000_000_000 })
+    const now = 2_000_000_000_000
+    const cutoff = now - 7 * 86_400_000
+    const ins = db.prepare(
+      `INSERT INTO connections (link_id, email, ts, host, port) VALUES (?, ?, ?, ?, ?)`,
+    )
+    ins.run('lk_a', 'lk_a', cutoff - 1, 'old.example', 443)
+    ins.run('lk_b', 'lk_b', cutoff + 1, 'new.example', 443)
+    const removed = sched.cleanupConnections()
+    expect(removed).toBe(1)
+    const left = db.prepare('SELECT COUNT(*) AS n FROM connections').get() as { n: number }
+    expect(left.n).toBe(1)
+  })
+
+  it('cleanupSamples 只删 30 天前的采样', async () => {
+    const { db, sched } = makeScheduler({ now: () => 2_000_000_000_000 })
+    const now = 2_000_000_000_000
+    const cutoff = now - 30 * 86_400_000
+    seed(db, { id: 'lk_a' })
+    seed(db, { id: 'lk_b' })
+    const ins = db.prepare(`INSERT INTO traffic_samples (link_id, ts, up_delta) VALUES (?, ?, ?)`)
+    ins.run('lk_a', cutoff - 1000, 5)
+    ins.run('lk_b', cutoff + 1000, 5)
+    const removed = sched.cleanupSamples()
+    expect(removed).toBe(1)
+    const left = db.prepare('SELECT COUNT(*) AS n FROM traffic_samples').get() as { n: number }
+    expect(left.n).toBe(1)
   })
 })

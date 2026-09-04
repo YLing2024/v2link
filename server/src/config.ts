@@ -31,6 +31,11 @@ const envSchema = z.object({
   MAX_HOURS: z.coerce.number().int().min(1).max(24 * 365).default(720),
   EXPIRE_SCAN_INTERVAL_S: z.coerce.number().int().min(3).max(3600).default(15),
   LEDGER_INTERVAL_S: z.coerce.number().int().min(5).max(3600).default(30),
+  ACCESS_LOG_PATH: z.string().trim().default('/var/log/xray/access.log'),
+  CONN_CLEANUP_INTERVAL_S: z.coerce.number().int().min(60).max(3600 * 24).default(3600),
+  CONN_RETENTION_S: z.coerce.number().int().min(3600).max(3600 * 24 * 30).default(3600 * 24 * 7),
+  SAMPLE_CLEANUP_INTERVAL_S: z.coerce.number().int().min(60).max(3600 * 24).default(3600 * 24),
+  SAMPLE_RETENTION_S: z.coerce.number().int().min(3600).max(3600 * 24 * 365).default(3600 * 24 * 30),
   AUTH_CENTER_VERIFY_URL: z
     .string()
     .trim()
@@ -66,6 +71,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxHours: p.MAX_HOURS,
     expireScanIntervalMs: p.EXPIRE_SCAN_INTERVAL_S * 1000,
     ledgerIntervalMs: p.LEDGER_INTERVAL_S * 1000,
+    accessLogPath: p.ACCESS_LOG_PATH,
+    connCleanupIntervalMs: p.CONN_CLEANUP_INTERVAL_S * 1000,
+    connRetentionMs: p.CONN_RETENTION_S * 1000,
+    sampleCleanupIntervalMs: p.SAMPLE_CLEANUP_INTERVAL_S * 1000,
+    sampleRetentionMs: p.SAMPLE_RETENTION_S * 1000,
     authVerifyUrl: p.AUTH_CENTER_VERIFY_URL,
     dbPath,
     devToken: p.ENABLE_DEV_TOKEN,
@@ -85,6 +95,16 @@ export interface Config {
   maxHours: number
   expireScanIntervalMs: number
   ledgerIntervalMs: number
+  /** xray access log 文件路径（log.access，logrotate copytruncate 管理） */
+  accessLogPath: string
+  /** connections 过期清理周期（默认 1h） */
+  connCleanupIntervalMs: number
+  /** connections 保留时长（默认 7 天滚动） */
+  connRetentionMs: number
+  /** traffic_samples 过期清理周期（默认 1 天） */
+  sampleCleanupIntervalMs: number
+  /** traffic_samples 保留时长（默认 30 天） */
+  sampleRetentionMs: number
   authVerifyUrl: string
   dbPath: string
   /** 本地无 nginx 直连调试令牌（空 = 关闭）。生产由 nginx 探针注入 X-Auth-User。 */

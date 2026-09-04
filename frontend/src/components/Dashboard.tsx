@@ -6,6 +6,8 @@ import type { Link } from '../types'
 import { CreateModal } from './CreateModal'
 import { CopyModal } from './CopyModal'
 import { ActModal } from './ActModal'
+import { LinkDetailModal } from './LinkDetailModal'
+import { AuditModal } from './AuditModal'
 
 // 主界面（Swiss 极简）：顶部栏 + 表格。
 // 状态徽标：active 绿点、expired/revoked 灰。操作按状态禁用。
@@ -20,6 +22,8 @@ type ModalState =
   | { kind: 'create' }
   | { kind: 'copy'; link: Link }
   | { kind: 'extend'; link: Link }
+  | { kind: 'detail'; link: Link }
+  | { kind: 'audit' }
   | null
 
 export default function Dashboard() {
@@ -76,6 +80,9 @@ export default function Dashboard() {
         <div className="topbar-right">
           <button type="button" className="btn" onClick={() => void refresh()} disabled={loading}>
             刷新
+          </button>
+          <button type="button" className="btn" onClick={() => setModal({ kind: 'audit' })}>
+            审计
           </button>
           <button type="button" className="btn btn-primary" onClick={() => setModal({ kind: 'create' })}>
             生成链接
@@ -139,6 +146,13 @@ export default function Dashboard() {
                           <button
                             type="button"
                             className="btn btn-sm"
+                            onClick={() => setModal({ kind: 'detail', link: l })}
+                          >
+                            详情
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm"
                             onClick={() => setModal({ kind: 'copy', link: l })}
                           >
                             复制/二维码
@@ -184,6 +198,10 @@ export default function Dashboard() {
           onDone={applyUpdate}
         />
       )}
+      {modal?.kind === 'detail' && (
+        <LinkDetailModal link={modal.link} onClose={() => setModal(null)} />
+      )}
+      {modal?.kind === 'audit' && <AuditModal onClose={() => setModal(null)} />}
     </div>
   )
 }

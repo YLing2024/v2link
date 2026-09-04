@@ -33,6 +33,8 @@ export interface LinksRepo {
   findActiveExpired(now: number): LinkRow[]
   /** 找出指定 uuid 仍 active 的链接（重启首拉放行判定） */
   findActiveByUuid(uuid: string): LinkRow | undefined
+  /** 按 email 找仍 active 的链接（access log 采集关联） */
+  findActiveByEmail(email: string): LinkRow | undefined
   listActive(): LinkRow[]
   extendExpiry(id: string, newExpiry: number): void
   expire(id: string, at: number): void
@@ -54,6 +56,7 @@ function statements(db: Database): LinksRepo {
     `SELECT * FROM links WHERE status = 'active' AND expires_at < ?`,
   )
   const stmtActiveByUuid = db.prepare(`SELECT * FROM links WHERE uuid = ? AND status = 'active'`)
+  const stmtActiveByEmail = db.prepare(`SELECT * FROM links WHERE email = ? AND status = 'active'`)
   const stmtListActive = db.prepare(`SELECT * FROM links WHERE status = 'active'`)
   const stmtExtend = db.prepare('UPDATE links SET expires_at = ? WHERE id = ?')
   const stmtExpire = db.prepare(
@@ -90,6 +93,10 @@ function statements(db: Database): LinksRepo {
     },
     findActiveByUuid(uuid) {
       const r = stmtActiveByUuid.get(uuid) as unknown as LinkRow | undefined
+      return r
+    },
+    findActiveByEmail(email) {
+      const r = stmtActiveByEmail.get(email) as unknown as LinkRow | undefined
       return r
     },
     listActive() {
