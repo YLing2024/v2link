@@ -73,8 +73,11 @@ export function createLinksRouter(
 
   router.post('/:id/extend', async (req, res) => {
     try {
-      const hours = Number((req.body as Record<string, unknown>)?.hours)
-      const link = await service.extend(req.params.id, hours, req.authUser)
+      const body = (req.body ?? {}) as Record<string, unknown>
+      // 入参收窄：只透传可识别字段（忽略多余键）；未提供即 undefined（服务层判定二选一）
+      const hours = body.hours === undefined ? undefined : Number(body.hours)
+      const expiresAt = body.expiresAt === undefined ? undefined : Number(body.expiresAt)
+      const link = await service.extend(req.params.id, { hours, expiresAt }, req.authUser)
       res.json({ ok: true, data: link })
     } catch (e) {
       sendError(res, e)

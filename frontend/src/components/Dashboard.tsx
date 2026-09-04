@@ -8,6 +8,7 @@ import { CopyModal } from './CopyModal'
 import { ActModal } from './ActModal'
 import { LinkDetailModal } from './LinkDetailModal'
 import { AuditModal } from './AuditModal'
+import { RegionProbeBar } from './RegionProbeBar'
 
 // 主界面（Swiss 极简）：顶部栏 + 表格。
 // 状态徽标：active 绿点、expired/revoked 灰。操作按状态禁用。
@@ -186,6 +187,8 @@ export default function Dashboard() {
           </table>
         </div>
       </main>
+
+      <RegionProbeBar />
 
       {modal?.kind === 'create' && (
         <CreateModal onClose={() => setModal(null)} onCreated={() => void refresh()} />

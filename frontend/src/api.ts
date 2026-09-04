@@ -2,7 +2,14 @@
 // 与 admin-web/src/api.js 语义一致（REQUIREMENTS.md §6）。业务组件只调本文件。
 
 import { getToken, redirectToAuth } from './lib/sso'
-import type { AuditRecord, ConnectionRecord, Link, Paged, TrafficPoint } from './types'
+import type {
+  AuditRecord,
+  ConnectionRecord,
+  Link,
+  Paged,
+  RegionProbeSnapshot,
+  TrafficPoint,
+} from './types'
 
 export class ApiError extends Error {
   status: number
@@ -63,11 +70,15 @@ export function revokeLink(id: string): Promise<Link> {
   return request<Link>(`/api/links/${encodeURIComponent(id)}/revoke`, { method: 'POST' })
 }
 
-export function extendLink(id: string, hours: number): Promise<Link> {
+export function extendLink(id: string, body: { expiresAt?: number; hours?: number }): Promise<Link> {
   return request<Link>(`/api/links/${encodeURIComponent(id)}/extend`, {
     method: 'POST',
-    body: { hours },
+    body,
   })
+}
+
+export function regionProbes(): Promise<RegionProbeSnapshot> {
+  return request<RegionProbeSnapshot>('/api/regions/probes')
 }
 
 export function linkTraffic(id: string, bucket: 'hour' | 'day', from?: number, to?: number): Promise<TrafficPoint[]> {
