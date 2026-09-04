@@ -2,7 +2,7 @@
 // 与 admin-web/src/api.js 语义一致（REQUIREMENTS.md §6）。业务组件只调本文件。
 
 import { getToken, redirectToAuth } from './lib/sso'
-import type { Link } from './types'
+import type { AuditRecord, ConnectionRecord, Link, Paged, TrafficPoint } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -68,4 +68,31 @@ export function extendLink(id: string, hours: number): Promise<Link> {
     method: 'POST',
     body: { hours },
   })
+}
+
+export function linkTraffic(id: string, bucket: 'hour' | 'day', from?: number, to?: number): Promise<TrafficPoint[]> {
+  const qs = new URLSearchParams({ bucket })
+  if (from !== undefined) qs.set('from', String(from))
+  if (to !== undefined) qs.set('to', String(to))
+  return request<TrafficPoint[]>(`/api/links/${encodeURIComponent(id)}/traffic?${qs}`)
+}
+
+export function linkConnections(
+  id: string,
+  opts: { q?: string; from?: number; to?: number; limit?: number; offset?: number } = {},
+): Promise<Paged<ConnectionRecord>> {
+  const qs = new URLSearchParams()
+  if (opts.q) qs.set('q', opts.q)
+  if (opts.from !== undefined) qs.set('from', String(opts.from))
+  if (opts.to !== undefined) qs.set('to', String(opts.to))
+  if (opts.limit !== undefined) qs.set('limit', String(opts.limit))
+  if (opts.offset !== undefined) qs.set('offset', String(opts.offset))
+  return request<Paged<ConnectionRecord>>(`/api/links/${encodeURIComponent(id)}/connections?${qs}`)
+}
+
+export function auditLog(opts: { limit?: number; offset?: number } = {}): Promise<Paged<AuditRecord>> {
+  const qs = new URLSearchParams()
+  if (opts.limit !== undefined) qs.set('limit', String(opts.limit))
+  if (opts.offset !== undefined) qs.set('offset', String(opts.offset))
+  return request<Paged<AuditRecord>>(`/api/audit?${qs}`)
 }

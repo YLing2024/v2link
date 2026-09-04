@@ -1,0 +1,21 @@
+# v2link —— xray access log 轮转配置（TASK-monitoring.md B）
+# 安装：cp deploy/xray-logrotate /etc/logrotate.d/xray-access && logrotate -f /etc/logrotate.d/xray-access
+# 前置：xray 以 root 运行、日志目录 /var/log/xray 已存在（deploy/xray.config.json 的 log.access）
+#   mkdir -p /var/log/xray
+#
+# copytruncate 是关键：轮转时把原文件截断为 0（而非 rename 换新），
+# 控制面 tailer 按 file offset 增量读，截断后 offset 归零重读，不丢不重。
+# 若改用 rename（默认 create 方案），tailer 也能跟随（检测 inode 变化重开），
+# 但轮转瞬间写入的行可能落到旧文件——故此处固定 copytruncate。
+#
+# 策略：按天轮转（保留 7 天，与 connections 表 7 天滚动对齐），夜间压缩。
+# 说明：access log 无字节数字段（实测），仅记录连接建立事件，量级随活跃用户线性增长。
+
+/var/log/xray/access.log {
+    daily
+    rotate 7
+    compress
+    missingok
+    copytruncate
+    su root root
+}

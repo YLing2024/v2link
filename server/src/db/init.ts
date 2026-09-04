@@ -29,9 +29,48 @@ export function initSchema(db: DbLike = getDb()): void {
   // 兜底（老 SQLite 不支持）走「建新表 → 搬迁 → 换名」。
   dropSpeedColumn(db)
 
-  // 预留：audit_log（操作审计，MVP 仅留 schema，UI 二期）。
-  // 需求 §4/§11 允许 schema 留注释，此处不建表以免空表增加维护噪音；
-  // 若启用，设计为记录 generate/revoke/extend 的操作者 + 时间戳（见 README「取舍」）。
+  // 监控/追溯/审计三张表（TASK-monitoring.md A/B/C）：
+  //   traffic_samples：流量采样（30s 粒度 delta，近 30 天，scheduler 每天清理）
+  //   connections：xray access log 采集（连接建立事件，近 7 天，scheduler 每小时清理）
+  //   audit_log：后台操作留痕（create/revoke/extend，仅管理员，不做保留裁剪）
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS traffic_samples (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      link_id     TEXT NOT NULL REFERENCES links(id),
+      ts          INTEGER NOT NULL,
+      up_delta    INTEGER NOT NULL DEFAULT 0,
+      down_delta  INTEGER NOT NULL DEFAULT 0
+    )
+  `)
+  db.exec('CREATE INDEX IF NOT EXISTS idx_samples_link_ts ON traffic_samples(link_id, ts)')
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS connections (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      link_id      TEXT,
+      email        TEXT NOT NULL,
+      ts           INTEGER NOT NULL,
+      host         TEXT,
+      port         INTEGER,
+      up_bytes     INTEGER,
+      down_bytes   INTEGER,
+      duration_ms  INTEGER
+    )
+  `)
+  db.exec('CREATE INDEX IF NOT EXISTS idx_conn_link_ts ON connections(link_id, ts)')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_conn_ts ON connections(ts)')
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts       INTEGER NOT NULL,
+      actor    TEXT NOT NULL,
+      action   TEXT NOT NULL,
+      link_id  TEXT,
+      detail   TEXT
+    )
+  `)
+  db.exec('CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts)')
 }
 
 // 检测旧列存在（SQLite 3.35+ 语法）；兼容老库无列的情况

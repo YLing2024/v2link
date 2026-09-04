@@ -4,7 +4,9 @@ import express, { type Express } from 'express'
 import { config } from './config.js'
 import { createAuthMiddleware } from './middleware/auth.js'
 import { createLinksRouter } from './routes/links.js'
+import { createAuditRouter } from './routes/audit.js'
 import { createHealthRouter } from './routes/health.js'
+import type { MonitoringRepo } from './db/monitoringRepo.js'
 import type { LinkService } from './services/linkService.js'
 
 // Express app 组装：JSON 解析 → 静态托管 → /api/healthz（无鉴权）→ /api（探针鉴权）。
@@ -27,7 +29,7 @@ function resolveFrontendDist(): string | null {
   return null
 }
 
-export function createApp(service: LinkService): Express {
+export function createApp(service: LinkService, monitor: MonitoringRepo): Express {
   const app = express()
   app.disable('x-powered-by')
   app.use(express.json({ limit: '64kb' }))
@@ -45,7 +47,8 @@ export function createApp(service: LinkService): Express {
       next()
     },
   )
-  app.use('/api/links', createLinksRouter(service))
+  app.use('/api/links', createLinksRouter(service, monitor))
+  app.use('/api/audit', createAuditRouter(monitor))
 
   // 静态托管（带 SPA 回退；assets 走一年缓存，html 不缓存）
   const staticDir = resolveFrontendDist()

@@ -44,3 +44,53 @@ export interface CreateLinkInput {
   note?: string
   hours?: number
 }
+
+// ---- 监控/追溯/审计（TASK-monitoring.md A/B/C）----
+
+// traffic_samples 行（30s 采样 delta）
+export interface TrafficSampleRow {
+  id: number
+  link_id: string
+  ts: number
+  up_delta: number
+  down_delta: number
+}
+
+// 聚合桶结果（API 返回形态）：ts = 桶起始时间（epoch ms，本地时区对齐）
+export interface TrafficPoint {
+  ts: number
+  up: number
+  down: number
+}
+
+// connections 行（access log 采集）
+export interface ConnectionRow {
+  id: number
+  link_id: string | null
+  email: string
+  ts: number
+  host: string | null
+  port: number | null
+  up_bytes: number | null
+  down_bytes: number | null
+  duration_ms: number | null
+}
+
+// audit_log 行
+export interface AuditRow {
+  id: number
+  ts: number
+  actor: string
+  action: string
+  link_id: string | null
+  detail: string | null
+}
+
+// audit 对外展示形态（detail 已 JSON.parse 为对象）
+export interface AuditView extends Omit<AuditRow, 'detail'> {
+  detail: AuditDetail
+}
+
+export type AuditAction = 'create' | 'revoke' | 'extend'
+
+export type AuditDetail = Record<string, unknown> | null

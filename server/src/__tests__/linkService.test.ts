@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { XrayClient } from '../services/xrayClient.js'
 import { createLinkService, HttpError } from '../services/linkService.js'
-import { makeRepo, makeTestDb } from './helpers.js'
+import { makeMonitor, makeRepo, makeTestDb } from './helpers.js'
+import type { MonitoringRepo } from '../db/monitoringRepo.js'
 
-// linkService 单测：状态机 + 「先落库后调 xray，失败回滚」的一致性约束。
+// linkService 单测：状态机 + 「先落库后调 xray，失败回滚」的一致性约束 + 操作审计（C 层）。
 // xray 用 mock（记录调用 / 可控失败）。
 
 function stubXray(overrides?: Partial<XrayClient>): XrayClient {
@@ -20,14 +21,16 @@ const limits = { defaultHours: 24, maxHours: 720 }
 function makeService(overrides?: { xray?: XrayClient; now?: () => number }) {
   const db = makeTestDb()
   const repo = makeRepo(db)
+  const monitor = makeMonitor(db)
   const svc = createLinkService({
     db,
     repo,
+    monitor,
     xray: overrides?.xray ?? stubXray(),
     limits,
     now: overrides?.now ?? (() => 1_700_000_000_000),
   })
-  return { db, repo, svc }
+  return { db, repo, monitor, svc }
 }
 
 describe('create', () => {
@@ -107,8 +110,9 @@ describe('状态机', () => {
   it('expired 状态同样拒绝操作（模拟扫描后）', async () => {
     const db = makeTestDb()
     const repo = makeRepo(db)
+    const monitor = makeMonitor(db)
     const svc = createLinkService({
-      db, repo,
+      db, repo, monitor,
       xray: stubXray(),
       limits,
       now: () => 1_700_000_000_000,
@@ -146,6 +150,49 @@ describe('extend', () => {
     const { svc } = makeService()
     await expect(svc.revoke('nope')).rejects.toMatchObject({ status: 404 })
     await expect(svc.extend('nope', 1)).rejects.toMatchObject({ status: 404 })
+  })
+})
+
+describe('操作审计（C 层）', () => {
+  function auditRows(monitor: MonitoringRepo): unknown[] {
+    return monitor.listAudit({ limit: 100, offset: 0 }).rows
+  }
+
+  it('create/revoke/extend 各写一条 audit_log，actor 缺省为 dev', async () => {
+    const { svc, monitor } = makeService({ now: () => 1_700_000_000_000 })
+    const link = await svc.create({ note: '朋友', hours: 2 })
+    await svc.revoke(link.id)
+    const rows = auditRows(monitor)
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({ actor: 'dev', action: 'revoke', link_id: link.id })
+    expect(rows[1]).toMatchObject({
+      actor: 'dev',
+      action: 'create',
+      link_id: link.id,
+      detail: { note: '朋友', hours: 2 },
+    })
+  })
+
+  it('传入 actor 时按实名记录；detail 为 JSON 对象', async () => {
+    const { svc, monitor } = makeService()
+    const link = await svc.create({}, 'admin@example')
+    await svc.revoke(link.id, 'admin@example')
+    const rows = auditRows(monitor)
+    expect(rows[0]).toMatchObject({ actor: 'admin@example', action: 'revoke' })
+    expect(rows[1]).toMatchObject({ actor: 'admin@example', action: 'create' })
+    // extend 的 detail 带 hours
+    const link2 = await svc.create({}, 'ops@example')
+    await svc.extend(link2.id, 3, 'ops@example')
+    const ext = auditRows(monitor)[0]
+    expect(ext.action).toBe('extend')
+    expect((ext.detail as Record<string, unknown>).hours).toBe(3)
+  })
+
+  it('create 时 xray 失败回滚 → 不留 audit 痕迹', async () => {
+    const xray = stubXray({ addUser: vi.fn(async () => { throw new Error('down') }) })
+    const { svc, monitor } = makeService({ xray })
+    await expect(svc.create({})).rejects.toMatchObject({ status: 502 })
+    expect(auditRows(monitor)).toHaveLength(0)
   })
 })
 

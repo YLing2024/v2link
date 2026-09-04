@@ -1,7 +1,8 @@
 import type { Database } from 'better-sqlite3'
 import { toView, type LinksRepo } from '../db/linksRepo.js'
+import type { MonitoringRepo } from '../db/monitoringRepo.js'
 import { newLinkId, randomUuid } from '../lib/id.js'
-import type { CreateLinkInput, LinkRow, LinkView } from '../types.js'
+import type { AuditAction, AuditDetail, CreateLinkInput, LinkRow, LinkView } from '../types.js'
 import type { XrayClient } from './xrayClient.js'
 
 // 业务编排：SQLite 账本为权威，xray 数据面为镜像。约定（REQUIREMENTS.md §5）：
@@ -32,14 +33,15 @@ export interface LinkLimits {
 
 export interface LinkService {
   list(): LinkView[]
-  create(input: CreateLinkInput): Promise<LinkView>
-  revoke(id: string): Promise<LinkView>
-  extend(id: string, hours: number): Promise<LinkView>
+  create(input: CreateLinkInput, actor?: string): Promise<LinkView>
+  revoke(id: string, actor?: string): Promise<LinkView>
+  extend(id: string, hours: number, actor?: string): Promise<LinkView>
 }
 
 interface Deps {
   db: Database
   repo: LinksRepo
+  monitor: MonitoringRepo
   xray: XrayClient
   limits: LinkLimits
   /** 默认取系统时钟；测试注入固定值 */
@@ -47,8 +49,20 @@ interface Deps {
 }
 
 export function createLinkService(deps: Deps): LinkService {
-  const { db, repo, xray, limits } = deps
+  const { db, repo, monitor, xray, limits } = deps
   const nowMs = deps.now ?? (() => Date.now())
+
+  // 操作审计：直连 dev token / 探针注入用户名 / 测试默认 → 缺省 'dev'
+  // （TASK-monitoring.md C §2：直连 dev token 场景 actor='dev'）。
+  function audit(action: AuditAction, link_id: string | null, detail: AuditDetail, actor?: string) {
+    monitor.insertAudit({
+      ts: nowMs(),
+      actor: actor?.trim() || 'dev',
+      action,
+      link_id,
+      detail,
+    })
+  }
 
   // ---- 输入校验（与 API 表一致：默认 hours=24；hours≤720）----
   function normalizeInput(input: CreateLinkInput): { note: string; hours: number } {
@@ -65,7 +79,7 @@ export function createLinkService(deps: Deps): LinkService {
     }
   }
 
-  async function create(input: CreateLinkInput): Promise<LinkView> {
+  async function create(input: CreateLinkInput, actor?: string): Promise<LinkView> {
     const { note, hours } = normalizeInput(input)
     const id = newLinkId()
     const uuid = randomUuid()
@@ -88,6 +102,7 @@ export function createLinkService(deps: Deps): LinkService {
     // ① 先落 SQLite（事务）
     const insertTx = db.transaction(() => {
       repo.insert(row)
+      audit('create', id, { note: note || null, hours }, actor)
     })
     insertTx()
 
@@ -97,6 +112,8 @@ export function createLinkService(deps: Deps): LinkService {
     } catch (e) {
       db.transaction(() => {
         db.prepare('DELETE FROM links WHERE id = ?').run(id)
+        // 审计留痕与账本一致：本次 create 未生效，同事务撤销审计行
+        db.prepare('DELETE FROM audit_log WHERE link_id = ?').run(id)
       })()
       throw apiError(502, `xray 添加用户失败，已回滚: ${(e as Error).message}`)
     }
@@ -112,12 +129,13 @@ export function createLinkService(deps: Deps): LinkService {
     return row
   }
 
-  async function revoke(id: string): Promise<LinkView> {
-    activeRow(id)
+  async function revoke(id: string, actor?: string): Promise<LinkView> {
+    const row = activeRow(id)
     const revokedAt = nowMs()
     // ① 先标 revoked（事务）
     db.transaction(() => {
       repo.revoke(id, revokedAt)
+      audit('revoke', id, { note: row.note || null }, actor)
     })()
     // ② xray rmu；失败 → 回滚回 active（可重试）
     try {
@@ -135,7 +153,7 @@ export function createLinkService(deps: Deps): LinkService {
     return viewById(repo, id)
   }
 
-  async function extend(id: string, hours: number): Promise<LinkView> {
+  async function extend(id: string, hours: number, actor?: string): Promise<LinkView> {
     const row = activeRow(id) // 延长仅 active（MVP）
     if (!Number.isInteger(hours) || hours < 1 || hours > limits.maxHours) {
       throw apiError(400, `延长时长须为 1~${limits.maxHours} 小时的整数`)
@@ -144,6 +162,7 @@ export function createLinkService(deps: Deps): LinkService {
     // 仅落库（expires_at 是纯控制面字段，xray 侧无需改动）
     db.transaction(() => {
       repo.extendExpiry(id, newExpiry)
+      audit('extend', id, { hours, expires_at: newExpiry }, actor)
     })()
     return viewById(repo, id)
   }

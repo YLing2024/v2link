@@ -23,3 +23,43 @@ export interface CreateLinkBody {
   note?: string
   hours?: number
 }
+
+// ---- 监控/追溯/审计（TASK-monitoring.md A/B/C）----
+
+// 流量曲线桶点（A）
+export interface TrafficPoint {
+  ts: number
+  up: number
+  down: number
+}
+
+// 连接记录行（B）
+export interface ConnectionRecord {
+  id: number
+  link_id: string | null
+  email: string
+  ts: number
+  host: string | null
+  port: number | null
+  up_bytes: number | null
+  down_bytes: number | null
+  duration_ms: number | null
+}
+
+// 审计日志行（C）
+export interface AuditRecord {
+  id: number
+  ts: number
+  actor: string
+  action: 'create' | 'revoke' | 'extend'
+  link_id: string | null
+  detail: Record<string, unknown> | null
+}
+
+// 分页信封（/connections 与 /audit 共用）
+export interface Paged<T> {
+  rows: T[]
+  total: number
+  limit: number
+  offset: number
+}
