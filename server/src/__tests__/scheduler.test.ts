@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Scheduler } from '../services/scheduler.js'
 import type { XrayClient } from '../services/xrayClient.js'
+import { createRegionProbeService, type RegionProbeService } from '../services/regionProbe.js'
 import { makeMonitor, makeRepo, makeTestDb } from './helpers.js'
 
 // Scheduler 单测：
@@ -41,6 +42,7 @@ function makeScheduler(overrides?: {
   sampleCleanupIntervalMs?: number
   connRetentionMs?: number
   sampleRetentionMs?: number
+  regionProbe?: RegionProbeService
 }) {
   const db = makeTestDb()
   const repo = makeRepo(db)
@@ -50,6 +52,7 @@ function makeScheduler(overrides?: {
     repo,
     monitor,
     xray: overrides?.xray ?? stubXray(),
+    regionProbe: overrides?.regionProbe,
     logger: () => undefined,
     now: overrides?.now ?? (() => 1_800_000_000_000),
     expireIntervalMs: overrides?.expireIntervalMs ?? 15_000,
@@ -213,5 +216,44 @@ describe('保留清理（A/B 滚动）', () => {
     expect(removed).toBe(1)
     const left = db.prepare('SELECT COUNT(*) AS n FROM traffic_samples').get() as { n: number }
     expect(left.n).toBe(1)
+  })
+})
+
+describe('地区连通性探测（TASK-extend-regions.md 需求 2）', () => {
+  function okFetch(): typeof fetch {
+    return vi.fn(async () => ({ ok: true, status: 204 } as unknown as Response)) as unknown as typeof fetch
+  }
+
+  it('runRegionProbes：调 RegionProbeService，单轮结果入内存（snapshot 可见）', async () => {
+    const probe = createRegionProbeService({
+      probes: [{ key: 'us', name: '美国', flag: '🇺🇸', url: 'https://us.example/generate_204' }],
+      fetchFn: okFetch(),
+      logger: () => undefined,
+    })
+    const { sched } = makeScheduler({ regionProbe: probe })
+    await sched.runRegionProbes()
+    const snap = probe.snapshot()
+    expect(snap.probes).toHaveLength(1)
+    expect(snap.probes[0]).toMatchObject({ key: 'us', ok: true, error: null })
+    expect(snap.probes[0]!.rttMs).not.toBeNull()
+  })
+
+  it('探测抛错不致命：scheduler 记日志不抛（下轮重试）', async () => {
+    const probe = createRegionProbeService({
+      probes: [{ key: 'us', name: '美国', flag: '🇺🇸', url: 'https://us.example/generate_204' }],
+      fetchFn: vi.fn(async () => {
+        throw new Error('boom')
+      }) as unknown as typeof fetch,
+      logger: () => undefined,
+    })
+    const { sched } = makeScheduler({ regionProbe: probe })
+    await expect(sched.runRegionProbes()).resolves.toBeUndefined()
+    const snap = probe.snapshot()
+    expect(snap.probes[0]!.ok).toBe(false)
+  })
+
+  it('未挂 regionProbe 时 runRegionProbes 为空操作', async () => {
+    const { sched } = makeScheduler({})
+    await expect(sched.runRegionProbes()).resolves.toBeUndefined()
   })
 })

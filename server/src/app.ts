@@ -6,8 +6,10 @@ import { createAuthMiddleware } from './middleware/auth.js'
 import { createLinksRouter } from './routes/links.js'
 import { createAuditRouter } from './routes/audit.js'
 import { createHealthRouter } from './routes/health.js'
+import { createRegionsRouter } from './routes/regions.js'
 import type { MonitoringRepo } from './db/monitoringRepo.js'
 import type { LinkService } from './services/linkService.js'
+import type { RegionProbeService } from './services/regionProbe.js'
 
 // Express app 组装：JSON 解析 → 静态托管 → /api/healthz（无鉴权）→ /api（探针鉴权）。
 // 生产拓扑：nginx 把 /api/* 走 auth-check 探针后反代到本服务并注入 X-Auth-User；
@@ -29,7 +31,7 @@ function resolveFrontendDist(): string | null {
   return null
 }
 
-export function createApp(service: LinkService, monitor: MonitoringRepo): Express {
+export function createApp(service: LinkService, monitor: MonitoringRepo, probe?: RegionProbeService): Express {
   const app = express()
   app.disable('x-powered-by')
   app.use(express.json({ limit: '64kb' }))
@@ -49,6 +51,8 @@ export function createApp(service: LinkService, monitor: MonitoringRepo): Expres
   )
   app.use('/api/links', createLinksRouter(service, monitor))
   app.use('/api/audit', createAuditRouter(monitor))
+  // 地区连通性探测（TASK-extend-regions.md 需求 2；regionProbe 缺省时 404 兜底）
+  if (probe) app.use('/api/regions', createRegionsRouter(probe))
 
   // 静态托管（带 SPA 回退；assets 走一年缓存，html 不缓存）
   const staticDir = resolveFrontendDist()

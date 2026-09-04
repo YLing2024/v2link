@@ -78,7 +78,7 @@ button {
 .content {
   max-width: 1080px;
   margin: 0 auto;
-  padding: 20px 16px 48px;
+  padding: 20px 16px 64px;
 }
 
 .banner {
@@ -574,4 +574,110 @@ button {
   max-width: 300px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ---- 底部地区连通性监控（TASK-extend-regions.md 需求 2）---- */
+.regionbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 24px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.regionbar-title {
+  font-weight: 600;
+  color: var(--ink-2);
+  letter-spacing: 0.03em;
+}
+
+.regionbar-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.region-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 10px 2px 6px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.region-flag {
+  font-size: 13px;
+}
+
+.region-name {
+  color: var(--ink-2);
+}
+
+.region-metric {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* 绿=正常 <300ms；黄=慢 300~800ms；红=失败/不可达 */
+.region-green {
+  border-color: rgba(34, 163, 95, 0.4);
+  background: rgba(34, 163, 95, 0.08);
+}
+
+.region-yellow {
+  border-color: rgba(210, 153, 34, 0.45);
+  background: rgba(230, 170, 40, 0.12);
+}
+
+.region-yellow .region-metric {
+  color: #a97b00;
+}
+
+.region-red {
+  border-color: rgba(208, 2, 27, 0.35);
+  background: rgba(208, 2, 27, 0.07);
+}
+
+.region-red .region-metric {
+  color: var(--danger);
+}
+
+.regionbar-ts {
+  color: var(--ink-2);
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.regionbar-empty,
+.regionbar-err {
+  color: var(--ink-2);
+}
+
+.regionbar-err {
+  color: var(--danger);
+}
+
+@media (max-width: 640px) {
+  .regionbar {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 10px;
+  }
+
+  .regionbar-ts {
+    margin-left: 0;
+    width: 100%;
+  }
 }

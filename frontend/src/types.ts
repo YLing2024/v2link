@@ -63,3 +63,19 @@ export interface Paged<T> {
   limit: number
   offset: number
 }
+
+// ---- 地区连通性监控（TASK-extend-regions.md 需求 2）----
+
+export interface RegionProbeResult {
+  key: string
+  ok: boolean
+  rttMs: number | null
+  error: string | null
+  ts: number
+}
+
+export interface RegionProbeSnapshot {
+  updatedAt: number
+  probes: (RegionProbeResult & { flag: string; name: string })[]
+  history: { ts: number; results: RegionProbeResult[] }[]
+}

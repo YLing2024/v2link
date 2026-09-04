@@ -41,6 +41,11 @@ const envSchema = z.object({
     .trim()
     .url()
     .default('http://127.0.0.1:8080/api/verify'),
+  // 地区连通性探测（TASK-extend-regions.md 需求 2）：端点列表 JSON（见 REGION_PROBES 常量）。
+  // 留空 = 用内置默认列表；探测失败不致命（状态条标红即可）。
+  REGION_PROBES: z.string().trim().optional(),
+  // 探测周期（秒，默认 300 = 每 5 分钟一轮）
+  REGION_PROBE_INTERVAL_S: z.coerce.number().int().min(60).max(3600).default(300),
   DB_PATH: z.string().trim().optional(),
   ENABLE_DEV_TOKEN: z
     .string()
@@ -80,6 +85,53 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dbPath,
     devToken: p.ENABLE_DEV_TOKEN,
     serverRoot,
+    regionProbes: p.REGION_PROBES,
+    regionProbeIntervalMs: p.REGION_PROBE_INTERVAL_S * 1000,
+  }
+}
+
+// 地区连通性探测默认端点（服务器直连各地区知名稳定 HTTPS 端点，HTTP(S) 测 RTT）。
+//   US: gstatic generate_204（Google 全球 anycast，实测就近美国；204 快速端点）
+//   EU: bbc.com（英国 BBC 首页，欧洲稳定长连接端点）
+//   JP: yahoo.co.jp 首页（日本本土稳定端点，y 首字母 keep-alive 快）
+//   SG: cloudflare.com（亚太 anycast，新加坡通常就近可达；同域用于亚太基准）
+// 私有地址零硬编码：端点一律走 HTTPS 公网域名，杜绝把机房/用户地址写入仓库。
+// 可在 .env 用 REGION_PROBES 覆盖（JSON: [{key,name,flag,url}]；key 为唯一标识）。
+export const REGION_PROBES: { key: string; name: string; flag: string; url: string }[] = [
+  { key: 'us', name: '美国', flag: '🇺🇸', url: 'https://www.gstatic.com/generate_204' },
+  { key: 'eu', name: '欧洲', flag: '🇪🇺', url: 'https://www.bbc.com/' },
+  { key: 'jp', name: '日本', flag: '🇯🇵', url: 'https://www.yahoo.co.jp/' },
+  { key: 'sg', name: '新加坡', flag: '🇸🇬', url: 'https://www.cloudflare.com/' },
+]
+
+/** 解析 REGION_PROBES env（JSON）。格式非法 → 忽略并回落内置列表（探测是增强功能，不因配错炸服务）。 */
+export function parseRegionProbes(raw: string | undefined): typeof REGION_PROBES {
+  if (!raw || !raw.trim()) return REGION_PROBES
+  try {
+    const arr = JSON.parse(raw) as unknown
+    if (!Array.isArray(arr) || arr.length === 0) return REGION_PROBES
+    const out: typeof REGION_PROBES = []
+    for (const item of arr) {
+      const r = item as { key?: unknown; name?: unknown; flag?: unknown; url?: unknown }
+      if (
+        typeof r.key === 'string' &&
+        r.key.trim() &&
+        typeof r.name === 'string' &&
+        r.name.trim() &&
+        typeof r.url === 'string' &&
+        r.url.startsWith('https://')
+      ) {
+        out.push({
+          key: r.key.trim(),
+          name: r.name.trim(),
+          flag: typeof r.flag === 'string' ? r.flag : '',
+          url: r.url,
+        })
+      }
+    }
+    return out.length ? out : REGION_PROBES
+  } catch {
+    return REGION_PROBES
   }
 }
 
@@ -110,6 +162,10 @@ export interface Config {
   /** 本地无 nginx 直连调试令牌（空 = 关闭）。生产由 nginx 探针注入 X-Auth-User。 */
   devToken: string
   serverRoot: string
+  /** 地区连通性探测端点（.env REGION_PROBES 可覆盖；默认见 REGION_PROBES 常量） */
+  regionProbes: string | undefined
+  /** 探测周期（默认 300s = 每 5 分钟一轮） */
+  regionProbeIntervalMs: number
 }
 
 // 全局单例：进程启动时解析一次（测试请用 loadConfig 注入自定义 env，勿依赖本单例）

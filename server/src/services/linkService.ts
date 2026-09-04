@@ -12,6 +12,17 @@ import type { XrayClient } from './xrayClient.js'
 // 状态机：active → expired | revoked；expired/revoked 不可再延长；revoked 不可逆（MVP，
 // 需求 §4 允许取舍：延长仅 active、revoked 不可复活）。
 // 说明：仅 extend 不触 xray（expires_at 纯控制面字段）；create/revoke 才需要数据面一致。
+//
+// extend 双语义（TASK-extend-regions.md 需求 1）：
+//   · hours 模式：相对延长，expires_at += hours*3600*1000（沿用 MAX_HOURS 上限）
+//   · expiresAt 模式：直接设置绝对过期时刻（epoch ms）
+// 两模式实现：先统一解析出「新的绝对过期时刻」，再一并落库 + 审计，天然二选一。
+
+/** extend 入参：绝对过期时刻与相对延长二选一（服务层以「都传报 400 拒绝」为准） */
+export interface ExtendInput {
+  expiresAt?: number
+  hours?: number
+}
 
 export class HttpError extends Error {
   status: number
@@ -25,6 +36,9 @@ export function apiError(status: number, message: string): HttpError {
   return new HttpError(status, message)
 }
 
+/** 绝对过期时刻允许的最大跨度（now ~ now+365 天；显式绝对时间不设小时上限，超出拒绝） */
+const MAX_EXPIRE_ABS_DAYS = 365
+
 /** 业务上限（默认值）来自 config，组装时注入——服务层不碰全局 config，利于测试 */
 export interface LinkLimits {
   defaultHours: number
@@ -35,7 +49,7 @@ export interface LinkService {
   list(): LinkView[]
   create(input: CreateLinkInput, actor?: string): Promise<LinkView>
   revoke(id: string, actor?: string): Promise<LinkView>
-  extend(id: string, hours: number, actor?: string): Promise<LinkView>
+  extend(id: string, input: ExtendInput, actor?: string): Promise<LinkView>
 }
 
 interface Deps {
@@ -153,16 +167,49 @@ export function createLinkService(deps: Deps): LinkService {
     return viewById(repo, id)
   }
 
-  async function extend(id: string, hours: number, actor?: string): Promise<LinkView> {
+  // extend：支持相对（hours）与绝对（expiresAt, epoch ms）两种模式。
+  //   - 两者都传 / 都不传 → 400（要求明确意图，避免歧义）
+  //   - hours：仅 active 可延；expires_at 向后平移 hours（沿用 MAX_HOURS 上限）
+  //   - expiresAt：直接把 expires_at 设为该值（显式绝对时刻，允许提前缩短有效期——
+  //     用户「自由设置过期时间」的隐含语义；前端二次 confirm 提示）。
+  //     范围 sanity：不得早于当前时刻（不允许设过去时间）；距 now > 365 天拒绝（防误填）。
+  async function extend(id: string, input: ExtendInput, actor?: string): Promise<LinkView> {
     const row = activeRow(id) // 延长仅 active（MVP）
-    if (!Number.isInteger(hours) || hours < 1 || hours > limits.maxHours) {
-      throw apiError(400, `延长时长须为 1~${limits.maxHours} 小时的整数`)
+    const { expiresAt, hours } = input
+    const hasHours = hours !== undefined
+    const hasAbs = expiresAt !== undefined
+    if (hasHours === hasAbs) {
+      throw apiError(400, hasHours ? '请二选一：expiresAt 或 hours，不能同时传' : '请指定 expiresAt 或 hours')
     }
-    const newExpiry = row.expires_at + hours * 3600 * 1000
+
+    let newExpiry: number
+    let detail: AuditDetail
+    if (hasAbs) {
+      const at = expiresAt as number
+      if (!Number.isFinite(at) || Math.trunc(at) !== at) {
+        throw apiError(400, 'expiresAt 须为 epoch 毫秒整数')
+      }
+      const now = nowMs()
+      if (at <= now) {
+        throw apiError(400, 'expiresAt 须晚于当前时间（不允许设置过去时刻）')
+      }
+      if (at - now > MAX_EXPIRE_ABS_DAYS * 24 * 3600 * 1000) {
+        throw apiError(400, `expiresAt 超出合理范围（未来 ${MAX_EXPIRE_ABS_DAYS} 天内）`)
+      }
+      newExpiry = at
+      detail = { expiresAt: at, expires_at: newExpiry }
+    } else {
+      const h = hours as number
+      if (!Number.isInteger(h) || h < 1 || h > limits.maxHours) {
+        throw apiError(400, `延长时长须为 1~${limits.maxHours} 小时的整数`)
+      }
+      newExpiry = row.expires_at + h * 3600 * 1000
+      detail = { hours: h, expires_at: newExpiry }
+    }
     // 仅落库（expires_at 是纯控制面字段，xray 侧无需改动）
     db.transaction(() => {
       repo.extendExpiry(id, newExpiry)
-      audit('extend', id, { hours, expires_at: newExpiry }, actor)
+      audit('extend', id, detail, actor)
     })()
     return viewById(repo, id)
   }

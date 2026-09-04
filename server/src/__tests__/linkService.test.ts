@@ -104,7 +104,7 @@ describe('状态机', () => {
     const { svc } = makeService()
     const link = await svc.create({})
     await svc.revoke(link.id)
-    await expect(svc.extend(link.id, 1)).rejects.toMatchObject({ status: 400 })
+    await expect(svc.extend(link.id, { hours: 1 })).rejects.toMatchObject({ status: 400 })
   })
 
   it('expired 状态同样拒绝操作（模拟扫描后）', async () => {
@@ -119,7 +119,7 @@ describe('状态机', () => {
     })
     const link = await svc.create({ hours: 1 })
     db.prepare("UPDATE links SET status='expired' WHERE id=?").run(link.id)
-    await expect(svc.extend(link.id, 1)).rejects.toMatchObject({ status: 400 })
+    await expect(svc.extend(link.id, { hours: 1 })).rejects.toMatchObject({ status: 400 })
   })
 })
 
@@ -133,7 +133,7 @@ describe('extend', () => {
     // create 已调用过 addUser；清空计数后再断言 extend 不触 xray
     addUser.mockClear()
     removeUser.mockClear()
-    const ext = await svc.extend(link.id, 5)
+    const ext = await svc.extend(link.id, { hours: 5 })
     expect(ext.expiresAt - link.expiresAt).toBe(5 * 3600 * 1000)
     expect(addUser).not.toHaveBeenCalled()
     expect(removeUser).not.toHaveBeenCalled()
@@ -142,14 +142,86 @@ describe('extend', () => {
   it('extend 非法时长 → 400', async () => {
     const { svc } = makeService()
     const link = await svc.create({})
-    await expect(svc.extend(link.id, 0)).rejects.toMatchObject({ status: 400 })
-    await expect(svc.extend(link.id, 721)).rejects.toMatchObject({ status: 400 })
+    await expect(svc.extend(link.id, { hours: 0 })).rejects.toMatchObject({ status: 400 })
+    await expect(svc.extend(link.id, { hours: 721 })).rejects.toMatchObject({ status: 400 })
   })
 
   it('不存在的链接 → 404', async () => {
     const { svc } = makeService()
     await expect(svc.revoke('nope')).rejects.toMatchObject({ status: 404 })
-    await expect(svc.extend('nope', 1)).rejects.toMatchObject({ status: 404 })
+    await expect(svc.extend('nope', { hours: 1 })).rejects.toMatchObject({ status: 404 })
+  })
+})
+
+describe('extend expiresAt 绝对过期时刻（TASK-extend-regions.md 需求 1）', () => {
+  const NOW = 1_700_000_000_000
+
+  it('传 expiresAt → expires_at 精确设为该值；详情写 {expiresAt}', async () => {
+    const { svc, repo, monitor } = makeService({ now: () => NOW })
+    const link = await svc.create({ hours: 1 })
+    const at = NOW + 3 * 3600 * 1000
+    const ext = await svc.extend(link.id, { expiresAt: at })
+    expect(ext.expiresAt).toBe(at)
+    expect(repo.byId(link.id)!.expires_at).toBe(at)
+    const audit = monitor.listAudit({ limit: 10, offset: 0 }).rows[0]!
+    expect(audit.action).toBe('extend')
+    expect(audit.detail).toMatchObject({ expiresAt: at, expires_at: at })
+    expect((audit.detail as Record<string, unknown>).hours).toBeUndefined()
+  })
+
+  it('expiresAt 可提前（缩短有效期），仍精确生效', async () => {
+    const { svc, repo } = makeService({ now: () => NOW })
+    const link = await svc.create({ hours: 48 })
+    const earlier = link.expiresAt - 2 * 3600 * 1000 // 比当前到期提前 2h，仍晚于 now
+    const ext = await svc.extend(link.id, { expiresAt: earlier })
+    expect(ext.expiresAt).toBe(earlier)
+    expect(repo.byId(link.id)!.expires_at).toBe(earlier)
+  })
+
+  it('expiresAt 早于当前时间 → 400', async () => {
+    const { svc } = makeService({ now: () => NOW })
+    const link = await svc.create({ hours: 1 })
+    await expect(svc.extend(link.id, { expiresAt: NOW })).rejects.toMatchObject({ status: 400 })
+    await expect(svc.extend(link.id, { expiresAt: NOW - 1000 })).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('expiresAt 超过 365 天 → 400（sanity 上限）', async () => {
+    const { svc } = makeService({ now: () => NOW })
+    const link = await svc.create({ hours: 1 })
+    const tooFar = NOW + 366 * 24 * 3600 * 1000
+    await expect(svc.extend(link.id, { expiresAt: tooFar })).rejects.toMatchObject({ status: 400 })
+    const ok = NOW + 365 * 24 * 3600 * 1000
+    const ext = await svc.extend(link.id, { expiresAt: ok })
+    expect(ext.expiresAt).toBe(ok)
+  })
+
+  it('非整数 / 非有限 expiresAt → 400', async () => {
+    const { svc } = makeService({ now: () => NOW })
+    const link = await svc.create({ hours: 1 })
+    await expect(svc.extend(link.id, { expiresAt: 1.5 })).rejects.toMatchObject({ status: 400 })
+    await expect(svc.extend(link.id, { expiresAt: NaN })).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('expiresAt 与 hours 都传 → 400；都不传 → 400', async () => {
+    const { svc, repo } = makeService({ now: () => NOW })
+    const link = await svc.create({ hours: 1 })
+    const orig = repo.byId(link.id)!.expires_at
+    await expect(
+      svc.extend(link.id, { expiresAt: NOW + 3600 * 1000, hours: 1 }),
+    ).rejects.toMatchObject({ status: 400 })
+    await expect(svc.extend(link.id, {})).rejects.toMatchObject({ status: 400 })
+    // 双传/都不传均不落地：expires_at 未变
+    expect(repo.byId(link.id)!.expires_at).toBe(orig)
+  })
+
+  it('audit 详情区分：hours 模式仍写 {hours, expires_at}；actor 透传', async () => {
+    const { svc, monitor } = makeService({ now: () => NOW })
+    const link = await svc.create({}, 'ops@example')
+    await svc.extend(link.id, { hours: 3 }, 'ops@example')
+    const extHours = monitor.listAudit({ limit: 10, offset: 0 }).rows[0]!
+    expect(extHours).toMatchObject({ actor: 'ops@example', action: 'extend' })
+    expect(extHours.detail).toMatchObject({ hours: 3 })
+    expect((extHours.detail as Record<string, unknown>).expiresAt).toBeUndefined()
   })
 })
 
@@ -182,7 +254,7 @@ describe('操作审计（C 层）', () => {
     expect(rows[1]).toMatchObject({ actor: 'admin@example', action: 'create' })
     // extend 的 detail 带 hours
     const link2 = await svc.create({}, 'ops@example')
-    await svc.extend(link2.id, 3, 'ops@example')
+    await svc.extend(link2.id, { hours: 3 }, 'ops@example')
     const ext = auditRows(monitor)[0]
     expect(ext.action).toBe('extend')
     expect((ext.detail as Record<string, unknown>).hours).toBe(3)

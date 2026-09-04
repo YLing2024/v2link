@@ -2,12 +2,14 @@ import type { Database } from 'better-sqlite3'
 import type { LinksRepo } from '../db/linksRepo.js'
 import type { MonitoringRepo } from '../db/monitoringRepo.js'
 import type { XrayClient } from './xrayClient.js'
+import type { RegionProbeService } from './regionProbe.js'
 import { parseStatsQuery } from '../lib/xrayStats.js'
 
-// 后台调度器（REQUIREMENTS.md §3.2/§3.3 + TASK-monitoring.md A/B）：
+// 后台调度器（REQUIREMENTS.md §3.2/§3.3 + TASK-monitoring.md A/B + TASK-extend-regions.md 需求 2）：
 //   · 过期扫描：每 15s 扫 status='active' AND expires_at<now → 逐个 rmu + 标 expired
 //   · 流量账本：每 30s statsquery -reset → delta 累加进 SQLite（links.up_bytes/down_bytes），
 //     同时写 traffic_samples 明细（流量曲线的数据源，A 层）
+//   · 地区连通性探测：每 5min 一轮 runRegionProbes（结果存内存，见 regionProbe.ts）
 //   · 保留清理：connections 7 天滚动（每小时）；traffic_samples 30 天（每天）——防无限增长
 //
 // 首拉语义（REQUIREMENTS.md §3.2 关注点）：xray stats 是易失计数器，账本权威在 SQLite。
@@ -35,6 +37,10 @@ export interface SchedulerOptions {
   sampleCleanupIntervalMs: number
   connRetentionMs: number
   sampleRetentionMs: number
+  /** 地区连通性探测服务（TASK-extend-regions.md 需求 2）。缺省 = 不挂探测。 */
+  regionProbe?: RegionProbeService
+  /** 地区探测周期（ms）。缺省 300000（5min）；0 = 挂上但不在定时器轮询 */
+  regionProbeIntervalMs?: number
 }
 
 export class Scheduler {
@@ -54,6 +60,9 @@ export class Scheduler {
   private ledgerTimer: ReturnType<typeof setTimeout> | null = null
   private connCleanupTimer: ReturnType<typeof setTimeout> | null = null
   private sampleCleanupTimer: ReturnType<typeof setTimeout> | null = null
+  private regionProbeTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly regionProbe: RegionProbeService | null
+  private readonly regionProbeIntervalMs: number
   private running = false
   /** 首次采集前置位：true = 未预热（见类头「首拉语义」注释） */
   private firstLedger = true
@@ -71,6 +80,8 @@ export class Scheduler {
     this.sampleCleanupIntervalMs = opts.sampleCleanupIntervalMs
     this.connRetentionMs = opts.connRetentionMs
     this.sampleRetentionMs = opts.sampleRetentionMs
+    this.regionProbe = opts.regionProbe ?? null
+    this.regionProbeIntervalMs = opts.regionProbeIntervalMs ?? 300_000
   }
 
   async start(): Promise<void> {
@@ -93,6 +104,16 @@ export class Scheduler {
     // 启动即清一次旧数据（service 长时间运行、定时器对齐等场景），保持留存水位
     void this.cleanupConnections()
     void this.cleanupSamples()
+    // 地区连通性探测：启动即跑首轮（服务刚启动未跑过 → 立即跑，见需求 2）
+    if (this.regionProbe) {
+      void this.runRegionProbes()
+      if (this.regionProbeIntervalMs > 0) {
+        this.regionProbeTimer = setInterval(
+          () => void this.runRegionProbes(),
+          this.regionProbeIntervalMs,
+        )
+      }
+    }
   }
 
   stop(): void {
@@ -101,10 +122,12 @@ export class Scheduler {
     if (this.ledgerTimer) clearInterval(this.ledgerTimer)
     if (this.connCleanupTimer) clearInterval(this.connCleanupTimer)
     if (this.sampleCleanupTimer) clearInterval(this.sampleCleanupTimer)
+    if (this.regionProbeTimer) clearInterval(this.regionProbeTimer)
     this.expireTimer = null
     this.ledgerTimer = null
     this.connCleanupTimer = null
     this.sampleCleanupTimer = null
+    this.regionProbeTimer = null
   }
 
   /** 过期扫描单轮（导出便于测试） */
@@ -175,6 +198,16 @@ export class Scheduler {
     const n = this.monitor.deleteSamplesBefore(before)
     if (n > 0) this.log('清理过期流量采样', { olderThanMs: before, removed: n })
     return n
+  }
+
+  /** 地区连通性探测单轮（结果存 RegionProbeService 内存）。失败不致命：记日志等下一轮。 */
+  async runRegionProbes(): Promise<void> {
+    if (!this.regionProbe) return
+    try {
+      await this.regionProbe.runRound()
+    } catch (e) {
+      this.log('地区连通性探测失败（下轮重试）', { err: (e as Error).message })
+    }
   }
 
   private async runLedger(): Promise<void> {
