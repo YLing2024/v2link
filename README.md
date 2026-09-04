@@ -1,12 +1,12 @@
 # v2link
 
-临时 VLESS 链接生成与分发管理系统——快速生成一条带有效期、限速与流量统计的 `vless://` 链接，扫码/复制即可用，全程在你的管理后台掌控之中。
+临时 VLESS 链接生成与分发管理系统——快速生成一条带有效期的 `vless://` 链接，扫码/复制即可用，全程在你的管理后台掌控之中。
 
 ## 它能做什么
 
-- **一键生成临时链接**：指定时长（1 小时 ~ 30 天）与限速，生成 `vless://` 链接 + 二维码
+- **一键生成临时链接**：指定时长（1 小时 ~ 30 天），生成 `vless://` 链接 + 二维码
 - **全客户端兼容**：v2rayN / Shadowrocket / Clash / sing-box 等主流客户端开箱即用
-- **生命周期管理**：到期自动失效；随时吊销、延长、改速
+- **生命周期管理**：到期自动失效；随时吊销、延长
 - **精确流量账本**：每链接上下行流量独立统计（SQLite 持久化，重启不丢）
 - **SSO 保护的管理后台**：接入自建认证中心，只有你能管理
 - **数据面热管理**：基于 xray 官方管理 API，加删用户**无需重启、不断存量连接**
@@ -72,17 +72,16 @@ npm install && npm run build   # 产物由控制面自动托管（server/../fron
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/links` | 全部链接 + 状态 + 上下行流量 |
-| POST | `/api/links` | 生成 `{ note?, hours?, speed_mbps? }` |
+| POST | `/api/links` | 生成 `{ note?, hours? }` |
 | POST | `/api/links/:id/revoke` | 吊销（立即从 xray 摘除） |
 | POST | `/api/links/:id/extend` | 延长 `{ hours }` |
-| POST | `/api/links/:id/speed` | 改速 `{ speed_mbps }` |
 | GET | `/api/healthz` | 健康检查（无鉴权） |
 
 全部 API（除 healthz）经 SSO 鉴权：生产环境由 nginx `auth_request` 注入 `X-Auth-User`；直连调试可用 `ENABLE_DEV_TOKEN`（仅限本地，生产务必关闭）。
 
 ## 配置（server/.env）
 
-见 `server/.env.example`（含每项注释）。关键项：`XRAY_API`（xray 管理地址）、`XRAY_INBOUND_TAG`、`AUTH_CENTER_VERIFY_URL`、`DEFAULT_HOURS/DEFAULT_SPEED`、`EXPIRE_SCAN_INTERVAL_S/LEDGER_INTERVAL_S`。
+见 `server/.env.example`（含每项注释）。关键项：`XRAY_API`（xray 管理地址）、`XRAY_INBOUND_TAG`、`AUTH_CENTER_VERIFY_URL`、`DEFAULT_HOURS/MAX_HOURS`、`EXPIRE_SCAN_INTERVAL_S/LEDGER_INTERVAL_S`。
 
 ## 开发
 

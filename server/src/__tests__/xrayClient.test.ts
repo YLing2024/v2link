@@ -42,7 +42,7 @@ describe('XrayClient argv 与 stdout 判定', () => {
         }
       },
     })
-    await c.addUser({ email: 'lk_abc', uuid: '11111111-1111-4111-8111-111111111111', speedMbps: 5 })
+    await c.addUser({ email: 'lk_abc', uuid: '11111111-1111-4111-8111-111111111111' })
     // argv 形态：['api', 'adu', '-s=...', '<tmp>/user.json']
     expect(argList[0]).toBe('api')
     expect(argList[1]).toBe('adu')
@@ -64,7 +64,7 @@ describe('XrayClient argv 与 stdout 判定', () => {
         return { stdout: 'Added 1 user(s) in total.\n', stderr: '' }
       },
     })
-    await c.addUser({ email: 'lk_abc', uuid: 'u', speedMbps: 7 })
+    await c.addUser({ email: 'lk_abc', uuid: 'u' })
     const parsed = content as { inbounds: { tag: string; settings: { clients: unknown[] } }[] }
     expect(Array.isArray(parsed.inbounds)).toBe(true)
     expect(parsed.inbounds[0]!.tag).toBe('vless-in')
@@ -75,12 +75,12 @@ describe('XrayClient argv 与 stdout 判定', () => {
     const { c } = makeClient(
       'rpc error: ... User lk_abc already exists.\nAdded 0 user(s) in total.\n',
     )
-    await expect(c.addUser({ email: 'lk_abc', uuid: 'u', speedMbps: 5 })).rejects.toThrow(/已存在/)
+    await expect(c.addUser({ email: 'lk_abc', uuid: 'u' })).rejects.toThrow(/已存在/)
   })
 
   it('addUser：Added 0（结构错）→ 抛错', async () => {
     const { c } = makeClient('Added 0 user(s) in total.\n')
-    await expect(c.addUser({ email: 'x', uuid: 'u', speedMbps: 1 })).rejects.toThrow(/未新增/)
+    await expect(c.addUser({ email: 'x', uuid: 'u' })).rejects.toThrow(/未新增/)
   })
 
   it('removeUser：解析 Removed N 返回数；不存在 → 0 不抛', async () => {

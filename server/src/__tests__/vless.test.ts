@@ -29,11 +29,8 @@ describe('buildVlessUri', () => {
 })
 
 describe('buildInboundFragment', () => {
-  it('带限速：生成完整 inbounds 包装（adu 必需）+ speedLimit 字段', () => {
-    const frag = buildInboundFragment(
-      { email: 'lk_abc', uuid: 'u', speedMbps: 5 },
-      'vless-in',
-    )
+  it('生成完整 inbounds 包装（adu 必需）且不携带限速字段', () => {
+    const frag = buildInboundFragment({ email: 'lk_abc', uuid: 'u' }, 'vless-in')
     expect(frag.inbounds).toHaveLength(1)
     const inbound = frag.inbounds[0] as { tag: string; protocol: string; settings: { clients: unknown[] } }
     expect(inbound.tag).toBe('vless-in')
@@ -43,17 +40,8 @@ describe('buildInboundFragment', () => {
         id: 'u',
         email: 'lk_abc',
         level: 0,
-        speedLimitUpMbps: 5,
-        speedLimitDownMbps: 5,
       },
     ])
-  })
-
-  it('speedMbps=0（不限）→ 不携带 speedLimit 字段', () => {
-    const frag = buildInboundFragment({ email: 'e', uuid: 'u', speedMbps: 0 }, 'vless-in')
-    const clients = (frag.inbounds[0] as { settings: { clients: Record<string, unknown>[] } })
-      .settings.clients
-    expect(clients[0]).toEqual({ id: 'u', email: 'e', level: 0 })
   })
 })
 

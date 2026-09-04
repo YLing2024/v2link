@@ -28,9 +28,7 @@ const envSchema = z.object({
   XRAY_API_TIMEOUT_S: z.coerce.number().int().min(1).max(30).default(3),
   XRAY_API_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
   DEFAULT_HOURS: z.coerce.number().int().min(1).max(24 * 30).default(24),
-  DEFAULT_SPEED: z.coerce.number().int().min(0).default(10),
   MAX_HOURS: z.coerce.number().int().min(1).max(24 * 365).default(720),
-  MAX_SPEED: z.coerce.number().int().min(1).default(100),
   EXPIRE_SCAN_INTERVAL_S: z.coerce.number().int().min(3).max(3600).default(15),
   LEDGER_INTERVAL_S: z.coerce.number().int().min(5).max(3600).default(30),
   AUTH_CENTER_VERIFY_URL: z
@@ -65,9 +63,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     xrayTimeoutMs: p.XRAY_API_TIMEOUT_S * 1000,
     xrayRetries: p.XRAY_API_RETRIES,
     defaultHours: p.DEFAULT_HOURS,
-    defaultSpeed: p.DEFAULT_SPEED,
     maxHours: p.MAX_HOURS,
-    maxSpeed: p.MAX_SPEED,
     expireScanIntervalMs: p.EXPIRE_SCAN_INTERVAL_S * 1000,
     ledgerIntervalMs: p.LEDGER_INTERVAL_S * 1000,
     authVerifyUrl: p.AUTH_CENTER_VERIFY_URL,
@@ -86,9 +82,7 @@ export interface Config {
   xrayTimeoutMs: number
   xrayRetries: number
   defaultHours: number
-  defaultSpeed: number
   maxHours: number
-  maxSpeed: number
   expireScanIntervalMs: number
   ledgerIntervalMs: number
   authVerifyUrl: string

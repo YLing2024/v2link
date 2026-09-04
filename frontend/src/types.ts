@@ -5,7 +5,6 @@ export interface Link {
   id: string
   uuid: string
   note: string
-  speedMbps: number
   upBytes: number
   downBytes: number
   createdAt: number
@@ -23,5 +22,4 @@ export interface ApiResponse<T> {
 export interface CreateLinkBody {
   note?: string
   hours?: number
-  speed_mbps?: number
 }

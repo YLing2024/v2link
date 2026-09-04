@@ -55,7 +55,7 @@ export function listLinks(): Promise<Link[]> {
   return request<Link[]>('/api/links')
 }
 
-export function createLink(body: { note?: string; hours?: number; speed_mbps?: number }): Promise<Link> {
+export function createLink(body: { note?: string; hours?: number }): Promise<Link> {
   return request<Link>('/api/links', { method: 'POST', body })
 }
 
@@ -67,12 +67,5 @@ export function extendLink(id: string, hours: number): Promise<Link> {
   return request<Link>(`/api/links/${encodeURIComponent(id)}/extend`, {
     method: 'POST',
     body: { hours },
-  })
-}
-
-export function changeSpeed(id: string, speedMbps: number): Promise<Link> {
-  return request<Link>(`/api/links/${encodeURIComponent(id)}/speed`, {
-    method: 'POST',
-    body: { speed_mbps: speedMbps },
   })
 }

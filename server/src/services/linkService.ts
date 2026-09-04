@@ -8,9 +8,9 @@ import type { XrayClient } from './xrayClient.js'
 //   所有写操作 = 先落 SQLite（事务）→ 再调 xray；
 //   xray 失败 → 回滚 SQLite 并抛 502（保证账本与数据面一致）。
 //
-// 状态机：active → expired | revoked；expired/revoked 不可再延长/改速；revoked 不可逆（MVP，
+// 状态机：active → expired | revoked；expired/revoked 不可再延长；revoked 不可逆（MVP，
 // 需求 §4 允许取舍：延长仅 active、revoked 不可复活）。
-// 说明：仅 extend 不触 xray（expires_at 纯控制面字段）；create/revoke/speed 才需要数据面一致。
+// 说明：仅 extend 不触 xray（expires_at 纯控制面字段）；create/revoke 才需要数据面一致。
 
 export class HttpError extends Error {
   status: number
@@ -28,8 +28,6 @@ export function apiError(status: number, message: string): HttpError {
 export interface LinkLimits {
   defaultHours: number
   maxHours: number
-  defaultSpeed: number
-  maxSpeed: number
 }
 
 export interface LinkService {
@@ -37,7 +35,6 @@ export interface LinkService {
   create(input: CreateLinkInput): Promise<LinkView>
   revoke(id: string): Promise<LinkView>
   extend(id: string, hours: number): Promise<LinkView>
-  changeSpeed(id: string, speedMbps: number): Promise<LinkView>
 }
 
 interface Deps {
@@ -53,33 +50,23 @@ export function createLinkService(deps: Deps): LinkService {
   const { db, repo, xray, limits } = deps
   const nowMs = deps.now ?? (() => Date.now())
 
-  // ---- 输入校验（与 API 表一致：默认 hours=24 speed=10；hours≤720 speed≤100）----
-  function normalizeInput(input: CreateLinkInput): { note: string; hours: number; speedMbps: number } {
+  // ---- 输入校验（与 API 表一致：默认 hours=24；hours≤720）----
+  function normalizeInput(input: CreateLinkInput): { note: string; hours: number } {
     const note = typeof input.note === 'string' ? input.note.trim().slice(0, 500) : ''
-    const { hours, speedMbps } = input
+    const { hours } = input
     if (hours !== undefined) {
       if (!Number.isInteger(hours) || hours < 1 || hours > limits.maxHours) {
         throw apiError(400, `时长须为 1~${limits.maxHours} 小时的整数`)
       }
     }
-    if (speedMbps !== undefined) {
-      if (
-        !Number.isInteger(speedMbps) ||
-        speedMbps < 0 ||
-        speedMbps > limits.maxSpeed
-      ) {
-        throw apiError(400, `限速须为 0~${limits.maxSpeed} Mbps 的整数（0=不限）`)
-      }
-    }
     return {
       note,
       hours: hours ?? limits.defaultHours,
-      speedMbps: speedMbps ?? limits.defaultSpeed,
     }
   }
 
   async function create(input: CreateLinkInput): Promise<LinkView> {
-    const { note, hours, speedMbps } = normalizeInput(input)
+    const { note, hours } = normalizeInput(input)
     const id = newLinkId()
     const uuid = randomUuid()
     const email = id // email = id（xray 用户标识/账本 key，REQUIREMENTS.md §4）
@@ -90,7 +77,6 @@ export function createLinkService(deps: Deps): LinkService {
       uuid,
       email,
       note,
-      speed_mbps: speedMbps,
       up_bytes: 0,
       down_bytes: 0,
       created_at: createdAt,
@@ -107,7 +93,7 @@ export function createLinkService(deps: Deps): LinkService {
 
     // ② 再 xray adu；失败 → 回滚 DB + 502（账本与数据面一致）
     try {
-      await xray.addUser({ email, uuid, speedMbps })
+      await xray.addUser({ email, uuid })
     } catch (e) {
       db.transaction(() => {
         db.prepare('DELETE FROM links WHERE id = ?').run(id)
@@ -162,37 +148,11 @@ export function createLinkService(deps: Deps): LinkService {
     return viewById(repo, id)
   }
 
-  async function changeSpeed(id: string, speedMbps: number): Promise<LinkView> {
-    const row = activeRow(id)
-    if (!Number.isInteger(speedMbps) || speedMbps < 0 || speedMbps > limits.maxSpeed) {
-      throw apiError(400, `限速须为 0~${limits.maxSpeed} Mbps 的整数（0=不限）`)
-    }
-    const prevSpeed = row.speed_mbps
-    // ① 先落库
-    db.transaction(() => {
-      repo.updateSpeed(id, speedMbps)
-    })()
-    // ② xray：adu 不覆盖更新（实测报 already exists）→ 改速 = rmu + adu 原子窗口。
-    //    rmu 幂等（不存在返回 0 不抛），正好覆盖「数据面此前缺该用户」的场景。
-    try {
-      await xray.removeUser(id)
-      await xray.addUser({ email: row.email, uuid: row.uuid, speedMbps })
-    } catch (e) {
-      // 回滚 DB speed（数据面保持旧限速）
-      db.transaction(() => {
-        db.prepare('UPDATE links SET speed_mbps = ? WHERE id = ?').run(prevSpeed, id)
-      })()
-      throw apiError(502, `xray 改速失败，已回滚: ${(e as Error).message}`)
-    }
-    return viewById(repo, id)
-  }
-
   return {
     list: () => repo.list(),
     create,
     revoke,
     extend,
-    changeSpeed,
   }
 }
 

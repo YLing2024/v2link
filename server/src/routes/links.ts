@@ -32,9 +32,8 @@ export function createLinksRouter(service: LinkService): Router {
       const body = (req.body ?? {}) as Record<string, unknown>
       const note = typeof body.note === 'string' ? body.note : ''
       const hours = body.hours === undefined ? undefined : Number(body.hours)
-      const speedMbps = body.speed_mbps === undefined ? undefined : Number(body.speed_mbps)
       // 手工边界预筛（zod 的错误结构与此处 ApiError 语义不同，统一走 service 校验更可测）
-      const link = await service.create({ note, hours, speedMbps })
+      const link = await service.create({ note, hours })
       res.status(201).json({ ok: true, data: link })
     } catch (e) {
       sendError(res, e)
@@ -54,16 +53,6 @@ export function createLinksRouter(service: LinkService): Router {
     try {
       const hours = Number((req.body as Record<string, unknown>)?.hours)
       const link = await service.extend(req.params.id, hours)
-      res.json({ ok: true, data: link })
-    } catch (e) {
-      sendError(res, e)
-    }
-  })
-
-  router.post('/:id/speed', async (req, res) => {
-    try {
-      const speedMbps = Number((req.body as Record<string, unknown>)?.speed_mbps)
-      const link = await service.changeSpeed(req.params.id, speedMbps)
       res.json({ ok: true, data: link })
     } catch (e) {
       sendError(res, e)

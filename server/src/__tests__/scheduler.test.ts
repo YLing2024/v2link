@@ -59,8 +59,8 @@ async function seed(
   // uuid 用随机值，避免跨用例重复触发 UNIQUE 约束
   const uuid = crypto.randomUUID()
   db.prepare(
-    `INSERT INTO links (id, uuid, email, note, speed_mbps, up_bytes, down_bytes, created_at, expires_at, revoked_at, status)
-     VALUES (?, ?, ?, '', 10, 0, 0, 0, ?, NULL, ?)`,
+    `INSERT INTO links (id, uuid, email, note, up_bytes, down_bytes, created_at, expires_at, revoked_at, status)
+     VALUES (?, ?, ?, '', 0, 0, 0, ?, NULL, ?)`,
   ).run(id, uuid, id, opts.expiresAt ?? 1_900_000_000_000, opts.status ?? 'active')
 }
 

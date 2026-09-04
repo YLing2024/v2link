@@ -20,8 +20,6 @@ const service = createLinkService({
   limits: {
     defaultHours: config.defaultHours,
     maxHours: config.maxHours,
-    defaultSpeed: config.defaultSpeed,
-    maxSpeed: config.maxSpeed,
   },
 })
 

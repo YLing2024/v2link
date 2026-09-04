@@ -11,7 +11,6 @@ export function toView(row: LinkRow): LinkView {
     id: row.id,
     uuid: row.uuid,
     note: row.note,
-    speedMbps: Number(row.speed_mbps),
     upBytes: Number(row.up_bytes),
     downBytes: Number(row.down_bytes),
     createdAt: Number(row.created_at),
@@ -28,7 +27,7 @@ export interface LinksRepo {
   insert(row: LinkRow): void
   updateStatus(id: string, status: LinkStatus, revokedAt: number | null): void
   addTraffic(id: string, upDelta: number, downDelta: number): void
-  /** 返回上一状态；用于「状态机合法性」校验（active 才允许转移/延长/改速） */
+  /** 返回上一状态；用于「状态机合法性」校验（active 才允许转移/延长） */
   getStatus(id: string): LinkStatus | undefined
   /** 一次性找出已过期但仍 active 的链接（过期扫描） */
   findActiveExpired(now: number): LinkRow[]
@@ -36,15 +35,14 @@ export interface LinksRepo {
   findActiveByUuid(uuid: string): LinkRow | undefined
   listActive(): LinkRow[]
   extendExpiry(id: string, newExpiry: number): void
-  updateSpeed(id: string, speedMbps: number): void
   expire(id: string, at: number): void
   revoke(id: string, at: number): void
 }
 
 function statements(db: Database): LinksRepo {
   const stmtInsert = db.prepare(
-    `INSERT INTO links (id, uuid, email, note, speed_mbps, up_bytes, down_bytes, created_at, expires_at, revoked_at, status)
-     VALUES (@id, @uuid, @email, @note, @speed_mbps, @up_bytes, @down_bytes, @created_at, @expires_at, @revoked_at, @status)`,
+    `INSERT INTO links (id, uuid, email, note, up_bytes, down_bytes, created_at, expires_at, revoked_at, status)
+     VALUES (@id, @uuid, @email, @note, @up_bytes, @down_bytes, @created_at, @expires_at, @revoked_at, @status)`,
   )
   const stmtById = db.prepare('SELECT * FROM links WHERE id = ?')
   const stmtStatus = db.prepare('SELECT status FROM links WHERE id = ?')
@@ -58,7 +56,6 @@ function statements(db: Database): LinksRepo {
   const stmtActiveByUuid = db.prepare(`SELECT * FROM links WHERE uuid = ? AND status = 'active'`)
   const stmtListActive = db.prepare(`SELECT * FROM links WHERE status = 'active'`)
   const stmtExtend = db.prepare('UPDATE links SET expires_at = ? WHERE id = ?')
-  const stmtSpeed = db.prepare('UPDATE links SET speed_mbps = ? WHERE id = ?')
   const stmtExpire = db.prepare(
     "UPDATE links SET status = 'expired' WHERE id = ? AND status = 'active'",
   )
@@ -100,9 +97,6 @@ function statements(db: Database): LinksRepo {
     },
     extendExpiry(id, newExpiry) {
       stmtExtend.run(newExpiry, id)
-    },
-    updateSpeed(id, speedMbps) {
-      stmtSpeed.run(speedMbps, id)
     },
     expire(id, at) {
       // at 仅作占位(状态语义不需要时间戳)，保留列以与 revoked_at 对齐

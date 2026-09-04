@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { createLink } from '../api'
 import Modal from './Modal'
 
-// 「生成链接」弹窗：时长快捷 + 自定义 + 限速 + 备注
-// 需求 §6：时长快捷 1h/6h/24h/3d/7d + 自定义 hours；限速默认 10（提示约 30Mbps 总带宽）
+// 「生成链接」弹窗：时长快捷 + 自定义 + 备注
+// 需求 §6：时长快捷 1h/6h/24h/3d/7d + 自定义 hours
 
 export const QUICK_HOURS: { label: string; hours: number }[] = [
   { label: '1h', hours: 1 },
@@ -23,7 +23,6 @@ export function CreateModal({
   const [hours, setHours] = useState<number>(24)
   const [customHours, setCustomHours] = useState('')
   const [custom, setCustom] = useState(false)
-  const [speed, setSpeed] = useState<number>(10)
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [err, setErr] = useState('')
@@ -37,13 +36,9 @@ export function CreateModal({
       setErr('时长须为 1~720 小时的整数')
       return
     }
-    if (!Number.isInteger(speed) || speed < 0 || speed > 100) {
-      setErr('限速须为 0~100 Mbps 的整数')
-      return
-    }
     setSubmitting(true)
     try {
-      await createLink({ note: note || undefined, hours: h, speed_mbps: speed })
+      await createLink({ note: note || undefined, hours: h })
       onCreated()
       onClose()
     } catch (e) {
@@ -91,19 +86,6 @@ export function CreateModal({
             />
           )}
         </div>
-
-        <label className="field">
-          <span className="field-label">限速（Mbps）</span>
-          <input
-            type="number"
-            min={0}
-            max={100}
-            className="input"
-            value={speed}
-            onChange={(e) => setSpeed(Number(e.target.value))}
-          />
-          <span className="field-hint">0 = 不限速；服务器总带宽约 30Mbps</span>
-        </label>
 
         <label className="field">
           <span className="field-label">备注</span>

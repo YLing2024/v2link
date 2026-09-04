@@ -6,7 +6,6 @@ export interface LinkRow {
   uuid: string
   email: string
   note: string
-  speed_mbps: number
   up_bytes: number
   down_bytes: number
   created_at: number
@@ -23,7 +22,6 @@ export interface LinkView {
   id: string
   uuid: string
   note: string
-  speedMbps: number
   upBytes: number
   downBytes: number
   createdAt: number
@@ -45,5 +43,4 @@ export type DbLike = Pick<Database, 'prepare' | 'transaction' | 'exec'> | Databa
 export interface CreateLinkInput {
   note?: string
   hours?: number
-  speedMbps?: number
 }

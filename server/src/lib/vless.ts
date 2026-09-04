@@ -48,16 +48,15 @@ export function linkToVlessUri(
   return buildVlessUri({ host, path, uuid: row.uuid })
 }
 
-// 构建 adu 所需的 xray inbound 配置片段（含 speedLimit）。
+// 构建 adu 所需的 xray inbound 配置片段。
 // 需求 §3.1 + 本地实测确认（2026-09-04）：
 //   · 顶层必须含 inbounds 数组（缺则 "Added 0 user(s)"）
 //   · inbound 至少含 tag / port / protocol / settings；listen/streamSettings 可省略
 //     （adu 只在运行中的 inbound 上加用户，不重建监听；port 任意正整数即可，语义上用不到）
-//   · 改速不能 adu 覆盖更新（同 email 报 already exists，Added 0 且 exit 0）→ 需 rmu + adu
+//   · 不做限速：xray VLESS 无 per-user 限速原生支持，不携带任何 speedLimit 字段
 export interface XrayUserSpec {
   email: string
   uuid: string
-  speedMbps: number
 }
 
 export function buildInboundFragment(
@@ -68,11 +67,6 @@ export function buildInboundFragment(
     id: spec.uuid,
     email: spec.email,
     level: 0,
-  }
-  // speed_mbps=0 表示不限速：不携带 speedLimit 字段（xray 缺省即不限）
-  if (spec.speedMbps > 0) {
-    client.speedLimitUpMbps = spec.speedMbps
-    client.speedLimitDownMbps = spec.speedMbps
   }
   return {
     inbounds: [

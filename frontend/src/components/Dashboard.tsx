@@ -20,7 +20,6 @@ type ModalState =
   | { kind: 'create' }
   | { kind: 'copy'; link: Link }
   | { kind: 'extend'; link: Link }
-  | { kind: 'speed'; link: Link }
   | null
 
 export default function Dashboard() {
@@ -98,7 +97,6 @@ export default function Dashboard() {
                 <th>状态</th>
                 <th>创建</th>
                 <th>到期</th>
-                <th>限速</th>
                 <th className="num">流量 ↓ / ↑</th>
                 <th className="ops">操作</th>
               </tr>
@@ -106,13 +104,13 @@ export default function Dashboard() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="empty">
+                  <td colSpan={6} className="empty">
                     加载中…
                   </td>
                 </tr>
               ) : links.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="empty">
+                  <td colSpan={6} className="empty">
                     暂无链接
                   </td>
                 </tr>
@@ -132,7 +130,6 @@ export default function Dashboard() {
                       </td>
                       <td className="mono">{formatDateTime(l.createdAt)}</td>
                       <td className="mono">{formatDateTime(l.expiresAt)}</td>
-                      <td className="mono">{l.speedMbps === 0 ? '不限' : `${l.speedMbps} Mbps`}</td>
                       <td className="num mono">
                         <span className="down">↓ {formatBytes(l.downBytes)}</span>{' '}
                         <span className="up">↑ {formatBytes(l.upBytes)}</span>
@@ -154,13 +151,6 @@ export default function Dashboard() {
                                 onClick={() => setModal({ kind: 'extend', link: l })}
                               >
                                 延长
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-sm"
-                                onClick={() => setModal({ kind: 'speed', link: l })}
-                              >
-                                改速
                               </button>
                               <button
                                 type="button"
@@ -189,15 +179,6 @@ export default function Dashboard() {
       {modal?.kind === 'copy' && <CopyModal uuid={modal.link.uuid} onClose={() => setModal(null)} />}
       {modal?.kind === 'extend' && (
         <ActModal
-          type="extend"
-          link={modal.link}
-          onClose={() => setModal(null)}
-          onDone={applyUpdate}
-        />
-      )}
-      {modal?.kind === 'speed' && (
-        <ActModal
-          type="speed"
           link={modal.link}
           onClose={() => setModal(null)}
           onDone={applyUpdate}

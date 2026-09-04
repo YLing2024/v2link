@@ -9,9 +9,11 @@ export function publicPath(): string {
   return (import.meta.env.VITE_PUBLIC_PATH as string | undefined)?.trim() || '/v2ws'
 }
 
-export function vlessLink(uuid: string): string {
-  const host = publicHost()
-  const path = publicPath()
+export function vlessLink(
+  uuid: string,
+  host: string = publicHost(),
+  path: string = publicPath(),
+): string {
   const wsPath = path.startsWith('/') ? path : `/${path}`
   const qs = new URLSearchParams({
     encryption: 'none',
