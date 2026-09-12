@@ -5,7 +5,10 @@ import { Router } from 'express'
 export function createHealthRouter(): Router {
   const router = Router()
   router.get('/', (_req, res) => {
-    res.json({ ok: true, data: { status: 'ok', now: Date.now() } })
+    res.json({
+      ok: true,
+      data: { status: 'ok', now: Date.now(), uptime: Math.floor(process.uptime()) },
+    })
   })
   return router
 }

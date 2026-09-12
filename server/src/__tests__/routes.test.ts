@@ -7,6 +7,7 @@ import { createAuditRouter } from '../routes/audit.js'
 import { createRegionsRouter } from '../routes/regions.js'
 import { createLinkService } from '../services/linkService.js'
 import { createRegionProbeService } from '../services/regionProbe.js'
+import { createHealthRouter } from '../routes/health.js'
 import type { XrayClient } from '../services/xrayClient.js'
 
 // /api/links 追溯子路由 + /api/audit 路由（TASK-monitoring.md A/B/C 对外接口）。
@@ -19,6 +20,21 @@ function stubXray(): XrayClient {
     queryTraffic: async () => '{}',
   } as unknown as XrayClient
 }
+
+describe('GET /api/healthz', () => {
+  it('返回进程运行秒数（取整）', async () => {
+    const app = express()
+    app.use('/api/healthz', createHealthRouter())
+    const before = Math.floor(process.uptime())
+    const res = await request(app).get('/api/healthz')
+    const after = Math.floor(process.uptime())
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({ ok: true, data: { status: 'ok' } })
+    expect(Number.isInteger(res.body.data.uptime)).toBe(true)
+    expect(res.body.data.uptime).toBeGreaterThanOrEqual(before)
+    expect(res.body.data.uptime).toBeLessThanOrEqual(after)
+  })
+})
 
 async function makeApp() {
   const db = makeTestDb()
