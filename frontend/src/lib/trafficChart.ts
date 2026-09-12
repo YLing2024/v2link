@@ -26,9 +26,8 @@ export const W = 640
 export const H = 110
 export const PAD = 6
 
-// 颜色语义：下行亮色、上行灰（与表格 ↓/↑ 一致）
-export const DOWN_COLOR = '#1a1a1a'
-export const UP_COLOR = '#9b9b9b'
+// 颜色不再写死在这里：折线/面积改由 CSS 类着色（chart-line-down / chart-line-up /
+// chart-area），这样深浅色主题都能跟随（见 styles/style.css）。
 
 export function chartGeom(points: TrafficPoint[]): ChartGeom {
   const max = maxVal(points)
