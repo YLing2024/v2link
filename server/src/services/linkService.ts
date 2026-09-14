@@ -86,45 +86,66 @@ export function createLinkService(deps: Deps): LinkService {
     })
   }
 
-  // ---- 输入校验（与 API 表一致：默认 hours=24；hours≤720；permanent 与 hours 互斥）----
+  // ---- 输入校验 ----
+  // 过期语义三选一：expiresAt（绝对时刻，主用法）/ hours（相对便捷档）/ permanent（永久）。
+  // 都不传 → 回落配置的 defaultHours（保持旧行为）。
   function normalizeInput(input: CreateLinkInput): {
     note: string
     alias: string
+    expiresAt: number | null
     hours: number
     permanent: boolean
   } {
     const note = typeof input.note === 'string' ? input.note.trim().slice(0, 500) : ''
     // 别名进 URL fragment，限长 100（客户端节点名展示用）
     const alias = typeof input.alias === 'string' ? input.alias.trim().slice(0, 100) : ''
-    const { hours, permanent } = input
+    const { hours, expiresAt, permanent } = input
     if (permanent !== undefined && typeof permanent !== 'boolean') {
       throw apiError(400, 'permanent 须为布尔值')
     }
     const isPermanent = permanent === true
-    if (isPermanent && hours !== undefined) {
-      throw apiError(400, '已选永久有效，不能再指定 hours（二选一）')
+    const hasHours = hours !== undefined
+    const hasAbs = expiresAt !== undefined
+    if ([isPermanent, hasHours, hasAbs].filter(Boolean).length > 1) {
+      throw apiError(400, 'expiresAt / hours / permanent 只能指定一个')
     }
-    if (!isPermanent && hours !== undefined) {
-      if (!Number.isInteger(hours) || hours < 1 || hours > limits.maxHours) {
-        throw apiError(400, `时长须为 1~${limits.maxHours} 小时的整数`)
+    if (hasHours && (!Number.isInteger(hours) || (hours as number) < 1 || (hours as number) > limits.maxHours)) {
+      throw apiError(400, `时长须为 1~${limits.maxHours} 小时的整数`)
+    }
+    let abs: number | null = null
+    if (hasAbs) {
+      const at = expiresAt as number
+      if (!Number.isFinite(at) || Math.trunc(at) !== at) {
+        throw apiError(400, 'expiresAt 须为 epoch 毫秒整数')
       }
+      const now = nowMs()
+      if (at <= now) {
+        throw apiError(400, 'expiresAt 须晚于当前时间（不允许设置过去时刻）')
+      }
+      if (at - now > MAX_EXPIRE_ABS_DAYS * 24 * 3600 * 1000) {
+        throw apiError(400, `expiresAt 超出合理范围（未来 ${MAX_EXPIRE_ABS_DAYS} 天内）`)
+      }
+      abs = at
     }
     return {
       note,
       alias,
+      expiresAt: abs,
       hours: hours ?? limits.defaultHours,
       permanent: isPermanent,
     }
   }
 
   async function create(input: CreateLinkInput, actor?: string): Promise<LinkView> {
-    const { note, alias, hours, permanent } = normalizeInput(input)
+    const { note, alias, expiresAt, hours, permanent } = normalizeInput(input)
     const id = newLinkId()
     const uuid = randomUuid()
     const email = id // email = id（xray 用户标识/账本 key，REQUIREMENTS.md §4）
     const createdAt = nowMs()
-    // 永久 → 哨兵 0（永不过期）；否则 创建时刻 + hours
-    const expiresAt = permanent ? PERMANENT_EXPIRES_AT : createdAt + hours * 3600 * 1000
+    // 过期时刻优先级：永久哨兵 > 绝对时刻 > 相对小时（默认档）
+    const expiresAtMs = permanent
+      ? PERMANENT_EXPIRES_AT
+      : (expiresAt ?? createdAt + hours * 3600 * 1000)
     const row: LinkRow = {
       id,
       uuid,
@@ -134,7 +155,7 @@ export function createLinkService(deps: Deps): LinkService {
       up_bytes: 0,
       down_bytes: 0,
       created_at: createdAt,
-      expires_at: expiresAt,
+      expires_at: expiresAtMs,
       revoked_at: null,
       status: 'active',
     }
@@ -142,14 +163,19 @@ export function createLinkService(deps: Deps): LinkService {
     // ① 先落 SQLite（事务）
     const insertTx = db.transaction(() => {
       repo.insert(row)
-      // 审计留痕：永久记 { permanent: true }，限时记 { hours }；别名非空时一并留痕
+      // 审计留痕：永久记 { permanent: true }；绝对时刻记 { expiresAt }；否则记相对 { hours }；
+      // 别名非空时一并留痕
       audit(
         'create',
         id,
         {
           note: note || null,
           ...(alias ? { alias } : {}),
-          ...(permanent ? { permanent: true } : { hours }),
+          ...(permanent
+            ? { permanent: true }
+            : expiresAt !== null
+              ? { expiresAt, expires_at: expiresAtMs }
+              : { hours }),
         },
         actor,
       )

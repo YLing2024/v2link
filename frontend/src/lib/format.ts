@@ -46,3 +46,24 @@ export function isPermanentExpiry(ts: number): boolean {
 export function formatExpiry(ts: number): string {
   return isPermanentExpiry(ts) ? '永久' : formatDateTime(ts)
 }
+
+/** 剩余时长（人类可读，分钟精度）：'剩 3 小时 20 分' / '剩 45 分' / '已过期 2 小时' / '永久' */
+export function formatRemaining(ts: number, now: number = Date.now()): string {
+  if (isPermanentExpiry(ts)) return '永久'
+  const diff = ts - now
+  const abs = Math.abs(diff)
+  const label = humanDuration(abs)
+  return diff > 0 ? `剩 ${label}` : `已过期${label ? ' ' + label : ''}`
+}
+
+/** 毫秒 → 中文时长（天/小时/分，取最长两级，<1 分记「不足 1 分」） */
+export function humanDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 60_000) return '不足 1 分'
+  const minutes = Math.floor(ms / 60_000)
+  const days = Math.floor(minutes / (24 * 60))
+  const hours = Math.floor((minutes % (24 * 60)) / 60)
+  const mins = minutes % 60
+  if (days > 0) return hours > 0 ? `${days} 天 ${hours} 小时` : `${days} 天`
+  if (hours > 0) return mins > 0 ? `${hours} 小时 ${mins} 分` : `${hours} 小时`
+  return `${mins} 分`
+}

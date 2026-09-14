@@ -28,8 +28,10 @@ export interface CreateLinkBody {
   note?: string
   /** 客户端节点名（写入 vless #fragment） */
   alias?: string
+  /** 绝对过期时刻（epoch ms，精确到分钟）；与 hours / permanent 三选一 */
+  expiresAt?: number
   hours?: number
-  /** true = 永久有效（与 hours 互斥） */
+  /** true = 永久有效（与 hours / expiresAt 互斥） */
   permanent?: boolean
 }
 

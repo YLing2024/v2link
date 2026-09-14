@@ -65,6 +65,7 @@ export function listLinks(): Promise<Link[]> {
 export function createLink(body: {
   note?: string
   alias?: string
+  expiresAt?: number
   hours?: number
   permanent?: boolean
 }): Promise<Link> {

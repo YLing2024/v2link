@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { toDateTimeLocal, toEpochMs } from '../components/ActModal'
+import { toDateTimeLocal, toEpochMs } from '../lib/datetime'
 
-// ActModal 双模式纯函数（TASK-extend-regions.md 需求 1）：
-//   toEpochMs：datetime-local 输入（本地时区）→ epoch ms
-//   toDateTimeLocal：epoch ms → datetime-local 可见字符串
+// 时间互转纯函数（datetime-local ⇄ epoch ms，分钟精度）：生成/编辑过期时间共用
 
 describe('toDateTimeLocal', () => {
   it('epoch ms → YYYY-MM-DDTHH:mm（本地时区，无秒）', () => {

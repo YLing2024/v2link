@@ -312,6 +312,16 @@ button {
   color: var(--faint);
 }
 
+/* 过期时间列：绝对时刻 + 剩余时长（派生显示，用户 2026-09-14 反馈） */
+.expiry-cell .expiry-sub {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--faint);
+}
+
 .empty {
   text-align: center;
   color: var(--faint);

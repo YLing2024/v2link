@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { listLinks, revokeLink } from '../api'
 import { clearToken } from '../lib/sso'
-import { formatBytes, formatDateTime, formatExpiry } from '../lib/format'
+import { formatBytes, formatDateTime, formatExpiry, formatRemaining } from '../lib/format'
 import type { Link } from '../types'
 import { CreateModal } from './CreateModal'
 import { CopyModal } from './CopyModal'
@@ -104,7 +104,7 @@ export default function Dashboard() {
                 <th>备注</th>
                 <th>状态</th>
                 <th>创建</th>
-                <th>到期</th>
+                <th>过期时间</th>
                 <th className="num">流量 ↓ / ↑</th>
                 <th className="ops">操作</th>
               </tr>
@@ -137,8 +137,13 @@ export default function Dashboard() {
                         <span className={`status-dot ${l.status}`} />
                         <span className="status-label">{STATUS_LABEL[l.status]}</span>
                       </td>
-                      <td className="mono">{formatDateTime(l.createdAt)}</td>
-                      <td className="mono">{formatExpiry(l.expiresAt)}</td>
+                      <td className="mono">
+                        {formatDateTime(l.createdAt)}
+                      </td>
+                      <td className="mono expiry-cell">
+                        {formatExpiry(l.expiresAt)}
+                        <span className="expiry-sub">{formatRemaining(l.expiresAt)}</span>
+                      </td>
                       <td className="num mono">
                         <span className="down">↓ {formatBytes(l.downBytes)}</span>{' '}
                         <span className="up">↑ {formatBytes(l.upBytes)}</span>
@@ -166,7 +171,7 @@ export default function Dashboard() {
                                 className="btn btn-sm"
                                 onClick={() => setModal({ kind: 'extend', link: l })}
                               >
-                                延长
+                                编辑
                               </button>
                               <button
                                 type="button"

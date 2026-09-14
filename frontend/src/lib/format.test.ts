@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { formatBytes, formatDateTime, formatExpiry, formatRelative, isPermanentExpiry } from './format'
+import {
+  formatBytes,
+  formatDateTime,
+  formatExpiry,
+  formatRelative,
+  formatRemaining,
+  humanDuration,
+  isPermanentExpiry,
+} from './format'
 
 describe('formatBytes', () => {
   it('B 级', () => {
@@ -54,5 +62,26 @@ describe('永久链接（expires_at 哨兵 0）', () => {
     expect(formatExpiry(0)).toBe('永久')
     const ts = new Date(2024, 0, 5, 9, 8).getTime()
     expect(formatExpiry(ts)).toBe('2024-01-05 09:08')
+  })
+})
+
+// 剩余时长（派生显示，用户 2026-09-14 反馈：小时/分钟信息放在过期时间旁边）
+describe('formatRemaining / humanDuration', () => {
+  const now = 1_800_000_000_000
+  const min = 60_000
+
+  it('humanDuration：分 / 小时 / 天，<1 分记「不足 1 分」', () => {
+    expect(humanDuration(30_000)).toBe('不足 1 分')
+    expect(humanDuration(45 * min)).toBe('45 分')
+    expect(humanDuration(3 * 3600_000 + 20 * min)).toBe('3 小时 20 分')
+    expect(humanDuration(2 * 24 * 3600_000 + 5 * 3600_000)).toBe('2 天 5 小时')
+    expect(humanDuration(3 * 24 * 3600_000)).toBe('3 天')
+  })
+
+  it('formatRemaining：剩 X / 已过期 X / 永久', () => {
+    expect(formatRemaining(now + 45 * min, now)).toBe('剩 45 分')
+    expect(formatRemaining(now + 3 * 3600_000 + 20 * min, now)).toBe('剩 3 小时 20 分')
+    expect(formatRemaining(now - 2 * 3600_000, now)).toBe('已过期 2 小时')
+    expect(formatRemaining(0, now)).toBe('永久')
   })
 })

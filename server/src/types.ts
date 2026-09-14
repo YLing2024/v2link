@@ -51,8 +51,11 @@ export interface CreateLinkInput {
   note?: string
   /** 客户端节点名（写入 vless #fragment）；缺省回退 note → id */
   alias?: string
+  /** 绝对过期时刻（epoch ms，精确到分钟即可）；与 hours / permanent 三选一 */
+  expiresAt?: number
+  /** 相对的方便档（= 创建时刻 + N 小时）；与 expiresAt / permanent 三选一 */
   hours?: number
-  /** true = 永久有效（与 hours 互斥）；缺省按 hours 计算到期时刻 */
+  /** true = 永久有效（与 hours / expiresAt 互斥）；缺省按 hours/expiresAt 计算到期时刻 */
   permanent?: boolean
 }
 
