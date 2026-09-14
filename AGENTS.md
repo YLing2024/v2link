@@ -26,7 +26,7 @@ server/src/
 ├── middleware/auth.ts
 ├── routes/{links,health,regions,audit}.ts
 ├── services/{linkService,xrayClient,scheduler,regionProbe}.ts
-└── __tests__/                      # vitest 用例（13 个）
+└── __tests__/                      # vitest 用例（server 12 个 + frontend 8 个测试文件）
 frontend/src/
 ├── api.ts / App.tsx / types.ts
 ├── lib/{sso,vless,format,datetime,trafficChart,regionProbe}.ts
