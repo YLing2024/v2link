@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
 import Modal from './Modal'
-import { vlessLink } from '../lib/vless'
+import { displayAlias, vlessLink } from '../lib/vless'
+import type { Link } from '../types'
 
 // 复制链接 & 二维码弹窗（点「复制」也顺带展示二维码便于扫码）
-export function CopyModal({ uuid, onClose }: { uuid: string; onClose: () => void }) {
-  const uri = vlessLink(uuid)
+// 别名（客户端节点名）写进 vless:// 的 #fragment：alias → note → id 回退，导入即有名。
+export function CopyModal({ link, onClose }: { link: Link; onClose: () => void }) {
+  const name = displayAlias(link)
+  const uri = vlessLink(link.uuid, undefined, undefined, name)
   const [qr, setQr] = useState('')
   const [copied, setCopied] = useState(false)
 
@@ -31,6 +34,9 @@ export function CopyModal({ uuid, onClose }: { uuid: string; onClose: () => void
       <div className="qr-wrap">
         {qr ? <img src={qr} alt="二维码" className="qr" /> : <div className="qr qr-empty">…</div>}
         <div className="vless-uri">{uri}</div>
+        <div className="field-hint">
+          {link.alias ? `节点名：${name}` : `节点名：${name}（未设别名，回退${link.note ? '备注' : '链接 ID'}）`}
+        </div>
         <button type="button" className="btn btn-primary btn-block" onClick={copy}>
           {copied ? '已复制' : '复制链接'}
         </button>

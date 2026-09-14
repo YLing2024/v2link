@@ -13,6 +13,7 @@ export function initSchema(db: DbLike = getDb()): void {
       uuid        TEXT NOT NULL UNIQUE,
       email       TEXT NOT NULL UNIQUE,
       note        TEXT NOT NULL DEFAULT '',
+      alias       TEXT NOT NULL DEFAULT '',
       up_bytes    INTEGER NOT NULL DEFAULT 0,
       down_bytes  INTEGER NOT NULL DEFAULT 0,
       created_at  INTEGER NOT NULL,
@@ -28,6 +29,10 @@ export function initSchema(db: DbLike = getDb()): void {
   // 优先 ALTER TABLE DROP COLUMN（SQLite ≥ 3.35，运行时 better-sqlite3 均为新版本）；
   // 兜底（老 SQLite 不支持）走「建新表 → 搬迁 → 换名」。
   dropSpeedColumn(db)
+
+  // 安全迁移：别名列（用户 2026-09-14 需求，vless 链接 #fragment = 客户端节点名）。
+  // ALTER TABLE ADD COLUMN 带默认值，SQLite 为 O(1)，老库数据保留，值默认 ''。
+  addAliasColumn(db)
 
   // 监控/追溯/审计三张表（TASK-monitoring.md A/B/C）：
   //   traffic_samples：流量采样（30s 粒度 delta，近 30 天，scheduler 每天清理）
@@ -79,6 +84,19 @@ function hasSpeedColumn(db: DbLike): boolean {
     .prepare("SELECT name FROM pragma_table_info('links')")
     .all() as { name: string }[]
   return rows.some((r) => r.name === 'speed_mbps')
+}
+
+function hasAliasColumn(db: DbLike): boolean {
+  const rows = db
+    .prepare("SELECT name FROM pragma_table_info('links')")
+    .all() as { name: string }[]
+  return rows.some((r) => r.name === 'alias')
+}
+
+/** 别名列补齐（老库升级路径）；已是新库则直接跳过 */
+function addAliasColumn(db: DbLike): void {
+  if (hasAliasColumn(db)) return
+  db.exec("ALTER TABLE links ADD COLUMN alias TEXT NOT NULL DEFAULT ''")
 }
 
 function dropSpeedColumn(db: DbLike): void {

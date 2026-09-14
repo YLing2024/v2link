@@ -8,8 +8,8 @@ describe('traffic_samples', () => {
     const db = makeTestDb()
     const mon = makeMonitor(db)
     const repo = makeRepo(db)
-    repo.insert({ id: 'lk_a', uuid: crypto.randomUUID(), email: 'lk_a', note: '', up_bytes: 0, down_bytes: 0, created_at: 1, expires_at: 2, revoked_at: null, status: 'active' })
-    repo.insert({ id: 'lk_b', uuid: crypto.randomUUID(), email: 'lk_b', note: '', up_bytes: 0, down_bytes: 0, created_at: 1, expires_at: 2, revoked_at: null, status: 'active' })
+    repo.insert({ id: 'lk_a', uuid: crypto.randomUUID(), email: 'lk_a', note: '', alias: '', up_bytes: 0, down_bytes: 0, created_at: 1, expires_at: 2, revoked_at: null, status: 'active' })
+    repo.insert({ id: 'lk_b', uuid: crypto.randomUUID(), email: 'lk_b', note: '', alias: '', up_bytes: 0, down_bytes: 0, created_at: 1, expires_at: 2, revoked_at: null, status: 'active' })
     mon.insertSamples([
       { link_id: 'lk_a', ts: 1000, up_delta: 1, down_delta: 2 },
       { link_id: 'lk_a', ts: 2000, up_delta: 3, down_delta: 4 },
@@ -24,7 +24,7 @@ describe('traffic_samples', () => {
 
 describe('connections', () => {
   function seedLink(repo: ReturnType<typeof makeRepo>, id: string) {
-    repo.insert({ id, uuid: crypto.randomUUID(), email: id, note: '', up_bytes: 0, down_bytes: 0, created_at: 1, expires_at: 2, revoked_at: null, status: 'active' })
+    repo.insert({ id, uuid: crypto.randomUUID(), email: id, note: '', alias: '', up_bytes: 0, down_bytes: 0, created_at: 1, expires_at: 2, revoked_at: null, status: 'active' })
   }
 
   it('分页：ts 倒序 + total + host 前缀搜索', () => {

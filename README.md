@@ -93,7 +93,7 @@ npm install && npm run build   # 产物由控制面自动托管（server/../fron
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/links` | 全部链接 + 状态 + 上下行流量 |
-| POST | `/api/links` | 生成 `{ note?, hours?, permanent? }`（`permanent` 与 `hours` 二选一，写审计） |
+| POST | `/api/links` | 生成 `{ note?, alias?, hours?, permanent? }`（`permanent` 与 `hours` 二选一，写审计） |
 | POST | `/api/links/:id/revoke` | 吊销（立即从 xray 摘除，写审计） |
 | POST | `/api/links/:id/extend` | 三选一：`{ hours }` 相对 / `{ expiresAt }` 绝对（epoch ms）/ `{ permanent: true }` 转永久（写审计） |
 | GET | `/api/regions/probes` | 地区连通性快照 + 最近 12 轮历史（需求 2，内存态） |
@@ -109,6 +109,8 @@ npm install && npm run build   # 产物由控制面自动托管（server/../fron
 > `permanent`（用户 2026-09-14 需求）：永久有效，永不过期，只能手动吊销。数据层用 `expires_at = 0` 作哨兵（单点定义见 `server/src/lib/expiry.ts`），过期扫描（每 15s）显式跳过；响应里 `permanent: boolean` 由 `expires_at` 推导，前端展示优先用它。生成时与 `hours` 互斥（同传 400）。
 >
 > **双向转换**（同日晚追加）：`extend` 支持三选一 —— `{ hours }` 相对、`{ expiresAt }` 绝对、`{ permanent: true }` 转永久。限时 ↔ 永久 可互转：永久 → 限时用 `{ expiresAt }`（永久链接没有基准时刻，传 `{ hours }` 返回 400）；已是永久再传 `{ permanent: true }` 返回 400。转换同样写审计：转永久记 `{ permanent: true }`，永久转限时记 `{ from: 'permanent', expiresAt, expires_at }`。
+>
+> `alias`（别名，用户 2026-09-14 需求）：客户端显示的节点名，写入 `vless://…` 的 `#fragment`（RFC 3986 百分号编码，中文/空格/特殊字符安全；v2rayN/NG、Shadowrocket、sing-box 导入时均会 UrlDecode）。生成时可填，限长 100，首尾空白裁剪。留空则回退链 **别名 → 备注 → 链接 ID**，保证导入客户端后节点一定有可辨识名字。响应 `LinkView.alias` 返回原值；列表在备注下方显示「别名：…」，复制/二维码弹窗底部显示最终节点名。
 
 ## 地区连通性监控（需求 2）
 

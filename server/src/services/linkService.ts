@@ -89,10 +89,13 @@ export function createLinkService(deps: Deps): LinkService {
   // ---- 输入校验（与 API 表一致：默认 hours=24；hours≤720；permanent 与 hours 互斥）----
   function normalizeInput(input: CreateLinkInput): {
     note: string
+    alias: string
     hours: number
     permanent: boolean
   } {
     const note = typeof input.note === 'string' ? input.note.trim().slice(0, 500) : ''
+    // 别名进 URL fragment，限长 100（客户端节点名展示用）
+    const alias = typeof input.alias === 'string' ? input.alias.trim().slice(0, 100) : ''
     const { hours, permanent } = input
     if (permanent !== undefined && typeof permanent !== 'boolean') {
       throw apiError(400, 'permanent 须为布尔值')
@@ -108,13 +111,14 @@ export function createLinkService(deps: Deps): LinkService {
     }
     return {
       note,
+      alias,
       hours: hours ?? limits.defaultHours,
       permanent: isPermanent,
     }
   }
 
   async function create(input: CreateLinkInput, actor?: string): Promise<LinkView> {
-    const { note, hours, permanent } = normalizeInput(input)
+    const { note, alias, hours, permanent } = normalizeInput(input)
     const id = newLinkId()
     const uuid = randomUuid()
     const email = id // email = id（xray 用户标识/账本 key，REQUIREMENTS.md §4）
@@ -126,6 +130,7 @@ export function createLinkService(deps: Deps): LinkService {
       uuid,
       email,
       note,
+      alias,
       up_bytes: 0,
       down_bytes: 0,
       created_at: createdAt,
@@ -137,11 +142,15 @@ export function createLinkService(deps: Deps): LinkService {
     // ① 先落 SQLite（事务）
     const insertTx = db.transaction(() => {
       repo.insert(row)
-      // 审计留痕：永久记 { permanent: true }，限时记 { hours }
+      // 审计留痕：永久记 { permanent: true }，限时记 { hours }；别名非空时一并留痕
       audit(
         'create',
         id,
-        permanent ? { note: note || null, permanent: true } : { note: note || null, hours },
+        {
+          note: note || null,
+          ...(alias ? { alias } : {}),
+          ...(permanent ? { permanent: true } : { hours }),
+        },
         actor,
       )
     })

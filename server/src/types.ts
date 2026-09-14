@@ -6,6 +6,8 @@ export interface LinkRow {
   uuid: string
   email: string
   note: string
+  /** 客户端节点名（vless #fragment）；空串 = 未设置，回退 note → id */
+  alias: string
   up_bytes: number
   down_bytes: number
   created_at: number
@@ -22,6 +24,8 @@ export interface LinkView {
   id: string
   uuid: string
   note: string
+  /** 客户端节点名（vless #fragment）；空串 = 未设置 */
+  alias: string
   upBytes: number
   downBytes: number
   createdAt: number
@@ -45,6 +49,8 @@ export type DbLike = Pick<Database, 'prepare' | 'transaction' | 'exec'> | Databa
 // 写接口入参（服务层/路由共用）
 export interface CreateLinkInput {
   note?: string
+  /** 客户端节点名（写入 vless #fragment）；缺省回退 note → id */
+  alias?: string
   hours?: number
   /** true = 永久有效（与 hours 互斥）；缺省按 hours 计算到期时刻 */
   permanent?: boolean
