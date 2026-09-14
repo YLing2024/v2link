@@ -105,6 +105,7 @@ function formatDetail(r: AuditRecord): string {
   if (!r.detail) return ''
   const d = r.detail
   const parts: string[] = []
+  if (d.permanent) parts.push('永久')
   if (d.hours !== undefined) parts.push(`${d.hours}h`)
   if (d.note) parts.push(String(d.note))
   if (d.expires_at !== undefined) parts.push(`到期 ${formatTs(Number(d.expires_at))}`)

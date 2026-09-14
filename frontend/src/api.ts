@@ -62,7 +62,11 @@ export function listLinks(): Promise<Link[]> {
   return request<Link[]>('/api/links')
 }
 
-export function createLink(body: { note?: string; hours?: number }): Promise<Link> {
+export function createLink(body: {
+  note?: string
+  hours?: number
+  permanent?: boolean
+}): Promise<Link> {
   return request<Link>('/api/links', { method: 'POST', body })
 }
 

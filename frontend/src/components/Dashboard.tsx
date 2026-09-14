@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { listLinks, revokeLink } from '../api'
 import { clearToken } from '../lib/sso'
-import { formatBytes, formatDateTime } from '../lib/format'
+import { formatBytes, formatDateTime, formatExpiry } from '../lib/format'
 import type { Link } from '../types'
 import { CreateModal } from './CreateModal'
 import { CopyModal } from './CopyModal'
@@ -137,7 +137,7 @@ export default function Dashboard() {
                         <span className="status-label">{STATUS_LABEL[l.status]}</span>
                       </td>
                       <td className="mono">{formatDateTime(l.createdAt)}</td>
-                      <td className="mono">{formatDateTime(l.expiresAt)}</td>
+                      <td className="mono">{formatExpiry(l.expiresAt)}</td>
                       <td className="num mono">
                         <span className="down">↓ {formatBytes(l.downBytes)}</span>{' '}
                         <span className="up">↑ {formatBytes(l.upBytes)}</span>
@@ -160,13 +160,15 @@ export default function Dashboard() {
                           </button>
                           {active && (
                             <>
-                              <button
-                                type="button"
-                                className="btn btn-sm"
-                                onClick={() => setModal({ kind: 'extend', link: l })}
-                              >
-                                延长
-                              </button>
+                              {!l.permanent && (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  onClick={() => setModal({ kind: 'extend', link: l })}
+                                >
+                                  延长
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 className="btn btn-sm btn-danger"

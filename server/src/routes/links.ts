@@ -54,8 +54,10 @@ export function createLinksRouter(
       const body = (req.body ?? {}) as Record<string, unknown>
       const note = typeof body.note === 'string' ? body.note : ''
       const hours = body.hours === undefined ? undefined : Number(body.hours)
+      // permanent 只透传原始值，类型/互斥校验在 service（可测）
+      const permanent = body.permanent as boolean | undefined
       // 手工边界预筛（zod 的错误结构与此处 ApiError 语义不同，统一走 service 校验更可测）
-      const link = await service.create({ note, hours }, req.authUser)
+      const link = await service.create({ note, hours, permanent }, req.authUser)
       res.status(201).json({ ok: true, data: link })
     } catch (e) {
       sendError(res, e)

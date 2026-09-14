@@ -34,3 +34,15 @@ export function formatDateTime(ts: number): string {
   const p = (x: number) => String(x).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
+
+/** 永久链接哨兵值：expires_at === 0（与后端 lib/expiry.ts 对应） */
+export const PERMANENT_EXPIRES_AT = 0
+
+export function isPermanentExpiry(ts: number): boolean {
+  return ts === PERMANENT_EXPIRES_AT
+}
+
+/** 到期展示：永久 → 「永久」，否则本地日期时间 */
+export function formatExpiry(ts: number): string {
+  return isPermanentExpiry(ts) ? '永久' : formatDateTime(ts)
+}

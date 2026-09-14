@@ -95,6 +95,24 @@ describe('过期扫描', () => {
     expect(rowB.status).toBe('active')
   })
 
+  it('永久链接（expires_at=0）不参与过期扫描，保持 active', async () => {
+    const removeUser = vi.fn(async () => 1)
+    const xray = stubXray({ removeUser })
+    const { db, sched } = makeScheduler({ xray, now: () => 1_800_000_000_000 })
+    seed(db, { id: 'lk_perm', expiresAt: 0 })
+    seed(db, { id: 'lk_due', expiresAt: 1_000 })
+
+    const expired = await sched.runExpire()
+    expect(expired).toEqual(['lk_due'])
+    expect(removeUser).not.toHaveBeenCalledWith('lk_perm')
+    const perm = db.prepare('SELECT status, expires_at FROM links WHERE id=?').get('lk_perm') as {
+      status: string
+      expires_at: number
+    }
+    expect(perm.status).toBe('active')
+    expect(perm.expires_at).toBe(0)
+  })
+
   it('rmu 失败 → 本轮跳过且不抛（下轮重试），保持 active', async () => {
     const removeUser = vi.fn(async () => { throw new Error('down') })
     const xray = stubXray({ removeUser })

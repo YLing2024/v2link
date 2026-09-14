@@ -56,6 +56,31 @@ async function makeApp() {
   return { app, db, monitor, link }
 }
 
+describe('POST /api/links（永久有效档位）', () => {
+  it('permanent=true → 201，data.permanent=true、expiresAt=0', async () => {
+    const { app } = await makeApp()
+    const res = await request(app).post('/api/links').send({ note: '长期', permanent: true })
+    expect(res.status).toBe(201)
+    expect(res.body).toMatchObject({ ok: true, data: { permanent: true, expiresAt: 0, status: 'active' } })
+    expect(res.body.data.note).toBe('长期')
+  })
+
+  it('permanent + hours 同传 → 400', async () => {
+    const { app } = await makeApp()
+    const res = await request(app).post('/api/links').send({ permanent: true, hours: 3 })
+    expect(res.status).toBe(400)
+    expect(res.body.ok).toBe(false)
+  })
+
+  it('不带 permanent → 沿用 hours（permanent=false）', async () => {
+    const { app } = await makeApp()
+    const res = await request(app).post('/api/links').send({ hours: 2 })
+    expect(res.status).toBe(201)
+    expect(res.body.data.permanent).toBe(false)
+    expect(res.body.data.expiresAt - res.body.data.createdAt).toBe(2 * 3600 * 1000)
+  })
+})
+
 describe('GET /api/links/:id/traffic', () => {
   it('空数据返回近 24h 的 hour 连续桶（补零），不报错', async () => {
     const { app, link } = await makeApp()
