@@ -79,7 +79,8 @@ export function createLinksRouter(
       // 入参收窄：只透传可识别字段（忽略多余键）；未提供即 undefined（服务层判定二选一）
       const hours = body.hours === undefined ? undefined : Number(body.hours)
       const expiresAt = body.expiresAt === undefined ? undefined : Number(body.expiresAt)
-      const link = await service.extend(req.params.id, { hours, expiresAt }, req.authUser)
+      const permanent = body.permanent as boolean | undefined
+      const link = await service.extend(req.params.id, { hours, expiresAt, permanent }, req.authUser)
       res.json({ ok: true, data: link })
     } catch (e) {
       sendError(res, e)

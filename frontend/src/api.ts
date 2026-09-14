@@ -74,7 +74,10 @@ export function revokeLink(id: string): Promise<Link> {
   return request<Link>(`/api/links/${encodeURIComponent(id)}/revoke`, { method: 'POST' })
 }
 
-export function extendLink(id: string, body: { expiresAt?: number; hours?: number }): Promise<Link> {
+export function extendLink(
+  id: string,
+  body: { expiresAt?: number; hours?: number; permanent?: boolean },
+): Promise<Link> {
   return request<Link>(`/api/links/${encodeURIComponent(id)}/extend`, {
     method: 'POST',
     body,

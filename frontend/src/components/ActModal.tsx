@@ -3,13 +3,15 @@ import Modal from './Modal'
 import { extendLink } from '../api'
 import type { Link } from '../types'
 
-// 延长链接弹窗（TASK-extend-regions.md 需求 1）：双模式
+// 延长链接弹窗：三模式
 //   · 「相对」：输入小时数（沿用 1~720 上限，向后平移当前到期时刻）
 //   · 「绝对」：datetime-local 选未来某个具体时刻 → 转 epoch ms 提交
+//   · 「转为永久」：expires_at 置哨兵 0，之后不再自动过期（二次 confirm）
+// 永久链接（link.permanent）没有基准时刻：只提供「绝对」模式（选到期时刻 = 转限时）。
 // 绝对模式允许提前（缩短有效期）：提交前 window.confirm 二次确认。
 // datetime-local 值为本地时区 → 校验 > now 即「未来」，与后端 epoch 语义一致。
 
-type Mode = 'hours' | 'absolute'
+type Mode = 'hours' | 'absolute' | 'permanent'
 
 /** datetime-local 输入 → epoch ms（输入为空/非法返回 null） */
 export function toEpochMs(dtLocal: string): number | null {
@@ -41,7 +43,7 @@ export function ActModal({
   onClose: () => void
   onDone: (updated: Link) => void
 }) {
-  const [mode, setMode] = useState<Mode>('hours')
+  const [mode, setMode] = useState<Mode>(link.permanent ? 'absolute' : 'hours')
   const [value, setValue] = useState<string>('')
   const [absInput, setAbsInput] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
@@ -59,8 +61,8 @@ export function ActModal({
   function switchMode(m: Mode) {
     setMode(m)
     setErr('')
-    // 切到绝对模式：预填当前到期时刻（保留其日间参考）
-    if (m === 'absolute') setAbsInput(toDateTimeLocal(link.expiresAt))
+    // 切到绝对模式：预填当前到期时刻（保留其日间参考）；永久链接无基准 → 留空由用户选
+    if (m === 'absolute') setAbsInput(link.permanent ? '' : toDateTimeLocal(link.expiresAt))
     if (m === 'hours') setValue('')
   }
 
@@ -77,6 +79,12 @@ export function ActModal({
         return
       }
       await doSubmit({ hours: v })
+      return
+    }
+    if (mode === 'permanent') {
+      const ok = window.confirm('转为永久有效后不再自动过期，只能手动吊销。确认？')
+      if (!ok) return
+      await doSubmit({ permanent: true })
       return
     }
     const ms = toEpochMs(absInput)
@@ -96,7 +104,7 @@ export function ActModal({
     await doSubmit({ expiresAt: ms })
   }
 
-  async function doSubmit(body: { expiresAt?: number; hours?: number }) {
+  async function doSubmit(body: { expiresAt?: number; hours?: number; permanent?: boolean }) {
     setSubmitting(true)
     try {
       const updated = await extendLink(link.id, body)
@@ -114,13 +122,15 @@ export function ActModal({
         <div className="field">
           <span className="field-label">方式</span>
           <div className="chips">
-            <button
-              type="button"
-              className={mode === 'hours' ? 'chip chip-on' : 'chip'}
-              onClick={() => switchMode('hours')}
-            >
-              相对
-            </button>
+            {!link.permanent && (
+              <button
+                type="button"
+                className={mode === 'hours' ? 'chip chip-on' : 'chip'}
+                onClick={() => switchMode('hours')}
+              >
+                相对
+              </button>
+            )}
             <button
               type="button"
               className={mode === 'absolute' ? 'chip chip-on' : 'chip'}
@@ -128,7 +138,19 @@ export function ActModal({
             >
               绝对
             </button>
+            {!link.permanent && (
+              <button
+                type="button"
+                className={mode === 'permanent' ? 'chip chip-on' : 'chip'}
+                onClick={() => switchMode('permanent')}
+              >
+                转为永久
+              </button>
+            )}
           </div>
+          {link.permanent && (
+            <span className="field-hint">当前为永久有效：选择到期时刻即转为限时。</span>
+          )}
         </div>
 
         {mode === 'hours' ? (
@@ -146,7 +168,7 @@ export function ActModal({
               onKeyDown={(e) => e.key === 'Enter' && submit()}
             />
           </label>
-        ) : (
+        ) : mode === 'absolute' ? (
           <>
             <label className="field">
               <span className="field-label">到期时刻（本地时间）</span>
@@ -159,20 +181,26 @@ export function ActModal({
               {futureHint && <span className="field-hint">{futureHint}</span>}
             </label>
             <div className="field">
-              <div className="chips">
-                {ABSOLUTE_STEPS.map((s) => (
-                  <button
-                    key={s.label}
-                    type="button"
-                    className="chip"
-                    onClick={() => setAbsInput(toDateTimeLocal(link.expiresAt + s.diffMs))}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
+              {!link.permanent && (
+                <div className="chips">
+                  {ABSOLUTE_STEPS.map((s) => (
+                    <button
+                      key={s.label}
+                      type="button"
+                      className="chip"
+                      onClick={() => setAbsInput(toDateTimeLocal(link.expiresAt + s.diffMs))}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </>
+        ) : (
+          <span className="field-hint">
+            转为永久后不再自动过期，需手动吊销；之后可用「绝对」模式随时设回到期时间。
+          </span>
         )}
 
         {err && <div className="form-error">{err}</div>}

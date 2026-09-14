@@ -308,13 +308,45 @@ describe('永久链接（permanent）', () => {
     ).rejects.toMatchObject({ status: 400 })
   })
 
-  it('extend 永久链接 → 400「永久链接无需延长」', async () => {
+  it('extend 三选一校验：多传 / 都不传 → 400', async () => {
+    const { svc } = makeService()
+    const link = await svc.create({ hours: 1 })
+    await expect(svc.extend(link.id, { hours: 1, permanent: true })).rejects.toMatchObject({ status: 400 })
+    await expect(
+      svc.extend(link.id, { hours: 1, expiresAt: 1_700_000_000_000 + 1000 }),
+    ).rejects.toMatchObject({ status: 400 })
+    await expect(svc.extend(link.id, {})).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('限时 → 永久：expires_at 置哨兵 0、view.permanent=true、审计 {permanent:true}', async () => {
+    const { svc, repo, monitor } = makeService()
+    const link = await svc.create({ hours: 2 })
+    const conv = await svc.extend(link.id, { permanent: true })
+    expect(conv.permanent).toBe(true)
+    expect(conv.expiresAt).toBe(0)
+    expect(repo.byId(link.id)!.expires_at).toBe(0)
+    const row = monitor.listAudit({ limit: 5, offset: 0 }).rows.find((r) => r.action === 'extend')!
+    expect(row.detail as Record<string, unknown>).toMatchObject({ permanent: true })
+  })
+
+  it('永久 → 限时：expiresAt 精确设值、permanent=false、审计标 from=permanent', async () => {
+    const NOW = 1_700_000_000_000
+    const { svc, repo, monitor } = makeService({ now: () => NOW })
+    const link = await svc.create({ permanent: true })
+    const at = NOW + 6 * 3600 * 1000
+    const conv = await svc.extend(link.id, { expiresAt: at })
+    expect(conv.permanent).toBe(false)
+    expect(conv.expiresAt).toBe(at)
+    expect(repo.byId(link.id)!.expires_at).toBe(at)
+    const row = monitor.listAudit({ limit: 5, offset: 0 }).rows.find((r) => r.action === 'extend')!
+    expect(row.detail as Record<string, unknown>).toMatchObject({ from: 'permanent' })
+  })
+
+  it('永久 + hours → 400（无基准时刻）；永久 + permanent → 400（已是永久）', async () => {
     const { svc } = makeService()
     const link = await svc.create({ permanent: true })
     await expect(svc.extend(link.id, { hours: 3 })).rejects.toMatchObject({ status: 400 })
-    await expect(
-      svc.extend(link.id, { expiresAt: 1_700_000_000_000 + 3600 * 1000 }),
-    ).rejects.toMatchObject({ status: 400 })
+    await expect(svc.extend(link.id, { permanent: true })).rejects.toMatchObject({ status: 400 })
   })
 
   it('永久链接仍可吊销（不因永久而不可逆）', async () => {

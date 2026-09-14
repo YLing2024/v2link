@@ -14,18 +14,22 @@ import type { XrayClient } from './xrayClient.js'
 // 需求 §4 允许取舍：延长仅 active、revoked 不可复活）。
 // 说明：仅 extend 不触 xray（expires_at 纯控制面字段）；create/revoke 才需要数据面一致。
 //
-// 永久链接（permanent）：expires_at = PERMANENT_EXPIRES_AT(0)，永不过期（过期扫描跳过），
-//   因此也无需延长（extend 对永久链接报 400）。与 hours 互斥。
+// 永久链接（permanent）：expires_at = PERMANENT_EXPIRES_AT(0)，永不过期（过期扫描跳过）。
+//   生成时与 hours 互斥；extend 三选一（hours / expiresAt / permanent），
+//   支持 限时 ↔ 永久 双向转换（永久 → 限时用 expiresAt 表达）。
 //
-// extend 双语义（TASK-extend-regions.md 需求 1）：
+// extend 三选一（hours / expiresAt / permanent）：
 //   · hours 模式：相对延长，expires_at += hours*3600*1000（沿用 MAX_HOURS 上限）
 //   · expiresAt 模式：直接设置绝对过期时刻（epoch ms）
-// 两模式实现：先统一解析出「新的绝对过期时刻」，再一并落库 + 审计，天然二选一。
+//   · permanent 模式：转为永久（expires_at = 哨兵 0）
+// 实现：先统一解析出「新的绝对过期时刻」（或永久哨兵），再一并落库 + 审计，天然三选一。
 
-/** extend 入参：绝对过期时刻与相对延长二选一（服务层以「都传报 400 拒绝」为准） */
+/** extend 入参：相对延长（hours）/ 绝对到期（expiresAt）/ 转永久（permanent）三选一
+ *  （服务层以「多传或都不传报 400」为准） */
 export interface ExtendInput {
   expiresAt?: number
   hours?: number
+  permanent?: boolean
 }
 
 export class HttpError extends Error {
@@ -190,28 +194,42 @@ export function createLinkService(deps: Deps): LinkService {
     return viewById(repo, id)
   }
 
-  // extend：支持相对（hours）与绝对（expiresAt, epoch ms）两种模式。
-  //   - 两者都传 / 都不传 → 400（要求明确意图，避免歧义）
-  //   - hours：仅 active 可延；expires_at 向后平移 hours（沿用 MAX_HOURS 上限）
+  // extend：三选一 —— 相对（hours）/ 绝对（expiresAt, epoch ms）/ 转永久（permanent: true）。
+  //   - 两个及以上 / 一个都没有 → 400（要求明确意图，避免歧义）
+  //   - hours：仅限时链接可延；expires_at 向后平移 hours（沿用 MAX_HOURS 上限）
   //   - expiresAt：直接把 expires_at 设为该值（显式绝对时刻，允许提前缩短有效期——
   //     用户「自由设置过期时间」的隐含语义；前端二次 confirm 提示）。
   //     范围 sanity：不得早于当前时刻（不允许设过去时间）；距 now > 365 天拒绝（防误填）。
+  //   - permanent: true：限时 → 永久（expires_at = 哨兵 0）；已是永久 → 400
+  //   - 永久 → 限时：用 expiresAt 表达（永久链接没有基准时刻，hours 无意义 → 400）
   async function extend(id: string, input: ExtendInput, actor?: string): Promise<LinkView> {
-    const row = activeRow(id) // 延长仅 active（MVP）
-    // 永久链接没有到期时刻可延（哨兵 0），直接拒绝，避免把 0 当基准算出错误时间
-    if (isPermanentExpiry(row.expires_at)) {
-      throw apiError(400, '永久链接无需延长')
+    const row = activeRow(id) // 延长/转换仅 active（MVP）
+    const wasPermanent = isPermanentExpiry(row.expires_at)
+    const { expiresAt, hours, permanent } = input
+    if (permanent !== undefined && typeof permanent !== 'boolean') {
+      throw apiError(400, 'permanent 须为布尔值')
     }
-    const { expiresAt, hours } = input
     const hasHours = hours !== undefined
     const hasAbs = expiresAt !== undefined
-    if (hasHours === hasAbs) {
-      throw apiError(400, hasHours ? '请二选一：expiresAt 或 hours，不能同时传' : '请指定 expiresAt 或 hours')
+    const hasPerm = permanent === true
+
+    const provided = [hasHours, hasAbs, hasPerm].filter(Boolean).length
+    if (provided !== 1) {
+      throw apiError(
+        400,
+        provided === 0
+          ? '请指定 hours、expiresAt 或 permanent 之一'
+          : '请三选一：hours / expiresAt / permanent，不能同时传',
+      )
     }
 
     let newExpiry: number
     let detail: AuditDetail
-    if (hasAbs) {
+    if (hasPerm) {
+      if (wasPermanent) throw apiError(400, '该链接已是永久有效')
+      newExpiry = PERMANENT_EXPIRES_AT
+      detail = { permanent: true }
+    } else if (hasAbs) {
       const at = expiresAt as number
       if (!Number.isFinite(at) || Math.trunc(at) !== at) {
         throw apiError(400, 'expiresAt 须为 epoch 毫秒整数')
@@ -224,11 +242,17 @@ export function createLinkService(deps: Deps): LinkService {
         throw apiError(400, `expiresAt 超出合理范围（未来 ${MAX_EXPIRE_ABS_DAYS} 天内）`)
       }
       newExpiry = at
-      detail = { expiresAt: at, expires_at: newExpiry }
+      // 永久 → 限时：审计标注来源，便于后台一眼看出这次是「转限时」而非普通延长
+      detail = wasPermanent
+        ? { from: 'permanent', expiresAt: at, expires_at: newExpiry }
+        : { expiresAt: at, expires_at: newExpiry }
     } else {
       const h = hours as number
       if (!Number.isInteger(h) || h < 1 || h > limits.maxHours) {
         throw apiError(400, `延长时长须为 1~${limits.maxHours} 小时的整数`)
+      }
+      if (wasPermanent) {
+        throw apiError(400, '永久链接没有到期时刻可平移，请用 expiresAt 指定绝对到期时间')
       }
       newExpiry = row.expires_at + h * 3600 * 1000
       detail = { hours: h, expires_at: newExpiry }

@@ -186,6 +186,29 @@ describe('POST /api/links/:id/extend（TASK-extend-regions.md 需求 1）', () =
     expect(past.status).toBe(400)
   })
 
+  it('转永久与双向转换：permanent=true 转永久；永久 + expiresAt → 转限时', async () => {
+    const { app, link } = await makeApp()
+    const toPerm = await request(app).post(`/api/links/${link.id}/extend`).send({ permanent: true })
+    expect(toPerm.status).toBe(200)
+    expect(toPerm.body.data).toMatchObject({ permanent: true, expiresAt: 0 })
+
+    const at = Date.now() + 5 * 3600 * 1000
+    const toFinite = await request(app)
+      .post(`/api/links/${link.id}/extend`)
+      .send({ expiresAt: at })
+    expect(toFinite.status).toBe(200)
+    expect(toFinite.body.data).toMatchObject({ permanent: false, expiresAt: at })
+  })
+
+  it('永久链接 + hours → 400（无基准时刻）；已是永久再转 → 400', async () => {
+    const { app, link } = await makeApp()
+    await request(app).post(`/api/links/${link.id}/extend`).send({ permanent: true })
+    const byHours = await request(app).post(`/api/links/${link.id}/extend`).send({ hours: 3 })
+    expect(byHours.status).toBe(400)
+    const again = await request(app).post(`/api/links/${link.id}/extend`).send({ permanent: true })
+    expect(again.status).toBe(400)
+  })
+
   it('非 active 链接（expired）extend → 400', async () => {
     const db = makeTestDb()
     const repo = makeRepo(db)
