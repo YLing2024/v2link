@@ -93,7 +93,7 @@ npm install && npm run build   # 产物由控制面自动托管（server/../fron
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/links` | 全部链接 + 状态 + 上下行流量 |
-| POST | `/api/links` | 生成 `{ note?, alias?, hours?, permanent? }`（`permanent` 与 `hours` 二选一，写审计） |
+| POST | `/api/links` | 生成 `{ note?, alias?, expiresAt?, hours?, permanent? }`（三者互斥：绝对过期时刻 / 相对小时便捷档 / 永久，写审计） |
 | POST | `/api/links/:id/revoke` | 吊销（立即从 xray 摘除，写审计） |
 | POST | `/api/links/:id/extend` | 三选一：`{ hours }` 相对 / `{ expiresAt }` 绝对（epoch ms）/ `{ permanent: true }` 转永久（写审计） |
 | GET | `/api/regions/probes` | 地区连通性快照 + 最近 12 轮历史（需求 2，内存态） |
@@ -106,7 +106,11 @@ npm install && npm run build   # 产物由控制面自动托管（server/../fron
 
 > `extend` 的 `expiresAt`：epoch 毫秒整数；须晚于当前时间、且不早于当前时刻起 365 天（显式绝对时刻不设小时上限，允许提前缩短有效期）。`hours` 沿用 1~720 上限，在当前到期时刻基础上向后平移。
 
-> `permanent`（用户 2026-09-14 需求）：永久有效，永不过期，只能手动吊销。数据层用 `expires_at = 0` 作哨兵（单点定义见 `server/src/lib/expiry.ts`），过期扫描（每 15s）显式跳过；响应里 `permanent: boolean` 由 `expires_at` 推导，前端展示优先用它。生成时与 `hours` 互斥（同传 400）。
+> `permanent`（用户 2026-09-14 需求）：永久有效，永不过期，只能手动吊销。数据层用 `expires_at = 0` 作哨兵（单点定义见 `server/src/lib/expiry.ts`），过期扫描（每 15s）显式跳过；响应里 `permanent: boolean` 由 `expires_at` 推导，前端展示优先用它。生成时与 `hours` / `expiresAt` 互斥（同传 400）。
+>
+> **过期时刻为准**（同日反馈）：生成与编辑都以**绝对过期时刻（分钟精度）**为主输入 —— `POST /api/links` 的 `expiresAt`（边界校验：晚于当前、≤ 未来 365 天，与 `hours`/`permanent` 互斥）；前端「生成链接」弹窗主输入是 `datetime-local`（默认预填 now+24h），`1 小时 / 6 小时 / 24 小时 / 3 天 / 7 天` 只是「一键把时刻设到此刻 + N」的快捷键，剩余时长以「距现在约 X」提示在旁边显示。列表「过期时间」列显示绝对时刻 + 派生小字 `剩 3 小时 20 分` / `已过期 2 小时` / `永久`；操作列的「延长」已改名为「编辑」（弹窗标题「编辑过期时间」，预填当前到期时刻，可直接换成别的时刻）。
+>
+> `hours` 仍保留为 API 便捷档（= 创建时刻 + N 小时，上限 `MAX_HOURS`），前端不再用它。
 >
 > **双向转换**（同日晚追加）：`extend` 支持三选一 —— `{ hours }` 相对、`{ expiresAt }` 绝对、`{ permanent: true }` 转永久。限时 ↔ 永久 可互转：永久 → 限时用 `{ expiresAt }`（永久链接没有基准时刻，传 `{ hours }` 返回 400）；已是永久再传 `{ permanent: true }` 返回 400。转换同样写审计：转永久记 `{ permanent: true }`，永久转限时记 `{ from: 'permanent', expiresAt, expires_at }`。
 >

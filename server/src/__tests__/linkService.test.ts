@@ -357,6 +357,43 @@ describe('永久链接（permanent）', () => {
   })
 })
 
+// 过期时刻为先（用户 2026-09-14 反馈：以「过期时间（精确到分钟）」为准，小时只是便捷档）
+describe('create 绝对过期时刻（expiresAt）', () => {
+  const NOW = 1_700_000_000_000
+
+  it('传 expiresAt → expires_at 精确等于该值（秒/分钟精度原样保留）', async () => {
+    const { svc, repo, monitor } = makeService({ now: () => NOW })
+    const at = NOW + 3 * 3600 * 1000 + 17 * 60 * 1000 // 3 小时 17 分后
+    const link = await svc.create({ expiresAt: at, note: '精确到期' })
+    expect(link.expiresAt).toBe(at)
+    expect(repo.byId(link.id)!.expires_at).toBe(at)
+    const row = monitor.listAudit({ limit: 5, offset: 0 }).rows[0]!
+    expect(row.detail as Record<string, unknown>).toMatchObject({ expiresAt: at, expires_at: at })
+  })
+
+  it('过去时刻 / 非整数 / 超 365 天 → 400', async () => {
+    const { svc } = makeService({ now: () => NOW })
+    await expect(svc.create({ expiresAt: NOW })).rejects.toMatchObject({ status: 400 })
+    await expect(svc.create({ expiresAt: NOW + 1.5 })).rejects.toMatchObject({ status: 400 })
+    await expect(
+      svc.create({ expiresAt: NOW + 366 * 24 * 3600 * 1000 }),
+    ).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('与 hours / permanent 互斥 → 400', async () => {
+    const { svc } = makeService({ now: () => NOW })
+    const at = NOW + 3600 * 1000
+    await expect(svc.create({ expiresAt: at, hours: 1 })).rejects.toMatchObject({ status: 400 })
+    await expect(svc.create({ expiresAt: at, permanent: true })).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('都不传 → 回落 defaultHours（旧行为不变）', async () => {
+    const { svc } = makeService({ now: () => NOW })
+    const link = await svc.create({})
+    expect(link.expiresAt - link.createdAt).toBe(24 * 3600 * 1000)
+  })
+})
+
 // 别名（alias）—— 用户 2026-09-14 需求：vless #fragment = 客户端节点名
 describe('别名（alias）', () => {
   it('create 带 alias → view.alias 原样返回（去首尾空白）', async () => {

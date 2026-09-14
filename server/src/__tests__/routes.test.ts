@@ -79,6 +79,16 @@ describe('POST /api/links（永久有效档位）', () => {
     expect(res.body.data.permanent).toBe(false)
     expect(res.body.data.expiresAt - res.body.data.createdAt).toBe(2 * 3600 * 1000)
   })
+
+  it('expiresAt 绝对过期时刻 → 精确落库；与 hours 同传 → 400', async () => {
+    const { app } = await makeApp()
+    const at = Date.now() + 3 * 3600 * 1000 + 25 * 60 * 1000
+    const res = await request(app).post('/api/links').send({ expiresAt: at, note: '精确' })
+    expect(res.status).toBe(201)
+    expect(res.body.data.expiresAt).toBe(at)
+    const both = await request(app).post('/api/links').send({ expiresAt: at, hours: 1 })
+    expect(both.status).toBe(400)
+  })
 })
 
 describe('GET /api/links/:id/traffic', () => {

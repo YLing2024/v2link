@@ -2,9 +2,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { Link } from '../types'
 
-// 延长弹窗的双向转换（用户 2026-09-14 需求 ②）：
-//   · 限时链接 → 「转为永久」提交 { permanent: true }（二次 confirm）
-//   · 永久链接 → 只给「绝对」模式（选到期时刻 = 转限时），不提供相对/转永久
+// 「编辑过期时间」弹窗（用户 2026-09-14 反馈）：直接改过期时刻，不再是「延长 N 小时」。
+//   · 限时链接：预填当前到期时刻；可改时刻，也可「转为永久」
+//   · 永久链接：无到期时刻可预填，选时刻即转为限时
 const { extendLinkMock } = vi.hoisted(() => ({
   extendLinkMock: vi.fn((_id: string, _body: Record<string, unknown>) => Promise.resolve({} as never)),
 }))
@@ -39,51 +39,86 @@ function setup(link: Link) {
 const chipLabels = () =>
   [...document.querySelectorAll('.modal .chip')].map((c) => c.textContent?.trim())
 
-describe('ActModal 限时 → 永久', () => {
-  it('提供三种方式，选「转为永久」确认后提交 permanent: true', async () => {
+function setLocalDatetime(ms: number) {
+  const d = new Date(ms)
+  const p = (x: number) => String(x).padStart(2, '0')
+  const v = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+  const input = document.querySelector('.modal input[type="datetime-local"]') as HTMLInputElement
+  fireEvent.change(input, { target: { value: v } })
+  return v
+}
+
+describe('编辑过期时间（限时链接）', () => {
+  it('预填当前到期时刻，改时刻后提交 { expiresAt }', async () => {
+    extendLinkMock.mockClear()
+    const link = makeLink({ expiresAt: Date.now() + 3600_000 })
+    setup(link)
+    expect(chipLabels()).toEqual(['指定时刻', '转为永久'])
+    const input = document.querySelector('.modal input[type="datetime-local"]') as HTMLInputElement
+    expect(input.value).not.toBe('')
+    const target = Date.now() + 5 * 3600_000
+    const typed = setLocalDatetime(target)
+    expect(screen.getByText(/距现在约/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('确定'))
+    await waitFor(() => expect(extendLinkMock).toHaveBeenCalledTimes(1))
+    const body = extendLinkMock.mock.calls[0]![1] as Record<string, unknown>
+    expect(typeof body.expiresAt).toBe('number')
+    // 提交值 = 输入框解析结果（分钟精度）
+    expect(new Date(typed).getTime()).toBe(body.expiresAt)
+  })
+
+  it('改为更早时刻 → 二次确认；取消则不提交', async () => {
+    extendLinkMock.mockClear()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    setup(makeLink({ expiresAt: Date.now() + 10 * 3600_000 }))
+    setLocalDatetime(Date.now() + 3600_000)
+    fireEvent.click(screen.getByText('确定'))
+    await new Promise((r) => setTimeout(r, 30))
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(extendLinkMock).not.toHaveBeenCalled()
+  })
+
+  it('转为永久 → confirm 后提交 { permanent: true }', async () => {
     extendLinkMock.mockClear()
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     setup(makeLink())
-    expect(chipLabels()).toEqual(['相对', '绝对', '转为永久'])
-
     fireEvent.click(screen.getByText('转为永久'))
     expect(screen.getByText(/转为永久后不再自动过期/)).toBeInTheDocument()
     fireEvent.click(screen.getByText('确定'))
     await waitFor(() => expect(extendLinkMock).toHaveBeenCalledTimes(1))
     expect(extendLinkMock.mock.calls[0]![1]).toMatchObject({ permanent: true })
   })
-
-  it('confirm 取消 → 不提交', async () => {
-    extendLinkMock.mockClear()
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
-    setup(makeLink())
-    fireEvent.click(screen.getByText('转为永久'))
-    fireEvent.click(screen.getByText('确定'))
-    await new Promise((r) => setTimeout(r, 30))
-    expect(extendLinkMock).not.toHaveBeenCalled()
-  })
 })
 
-describe('ActModal 永久 → 限时', () => {
-  it('永久链接只有「绝对」方式，并提示当前为永久', () => {
+describe('编辑过期时间（永久链接）', () => {
+  it('无方式切换、输入为空，提示「选择过期时间即转为限时」', () => {
     setup(makeLink({ permanent: true, expiresAt: 0 }))
-    expect(chipLabels()).toEqual(['绝对'])
-    expect(screen.getByText(/当前为永久有效/)).toBeInTheDocument()
-    expect(screen.queryByText('转为永久')).toBeNull()
+    expect(chipLabels()).toEqual([])
+    expect(screen.getByText(/选择过期时间即转为限时/)).toBeInTheDocument()
+    const input = document.querySelector('.modal input[type="datetime-local"]') as HTMLInputElement
+    expect(input.value).toBe('')
   })
 
-  it('选到期时刻提交 → { expiresAt }（转限时）', async () => {
+  it('填未来时刻 → 提交 { expiresAt }（转限时）', async () => {
     extendLinkMock.mockClear()
     setup(makeLink({ permanent: true, expiresAt: 0 }))
-    const input = document.querySelector('.modal input[type="datetime-local"]') as HTMLInputElement
-    const future = new Date(Date.now() + 3 * 3600_000)
-    const p = (x: number) => String(x).padStart(2, '0')
-    const local = `${future.getFullYear()}-${p(future.getMonth() + 1)}-${p(future.getDate())}T${p(future.getHours())}:${p(future.getMinutes())}`
-    fireEvent.change(input, { target: { value: local } })
+    setLocalDatetime(Date.now() + 3 * 3600_000)
     fireEvent.click(screen.getByText('确定'))
     await waitFor(() => expect(extendLinkMock).toHaveBeenCalledTimes(1))
     const body = extendLinkMock.mock.calls[0]![1] as Record<string, unknown>
     expect(typeof body.expiresAt).toBe('number')
     expect(body.permanent).toBeUndefined()
+  })
+
+  it('过去时刻 → 报错且不提交', async () => {
+    extendLinkMock.mockClear()
+    setup(makeLink({ permanent: true, expiresAt: 0 }))
+    setLocalDatetime(Date.now() - 3600_000)
+    fireEvent.click(screen.getByText('确定'))
+    await waitFor(() =>
+      expect(document.querySelector('.form-error')?.textContent).toMatch(/须晚于当前时间/),
+    )
+    expect(extendLinkMock).not.toHaveBeenCalled()
   })
 })
