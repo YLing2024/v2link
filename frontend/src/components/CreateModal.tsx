@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { createLink } from '../api'
 import Modal from './Modal'
 
-// 「生成链接」弹窗：时长快捷 + 自定义 + 备注
-// 需求 §6：时长快捷 1h/6h/24h/3d/7d + 自定义 hours
+// 「生成链接」弹窗：时长快捷 + 自定义 + 永久 + 备注
+// 需求 §6：时长快捷 1h/6h/24h/3d/7d + 自定义 hours；用户 2026-09-14 追加「永久有效」档位
 
 export const QUICK_HOURS: { label: string; hours: number }[] = [
   { label: '1h', hours: 1 },
@@ -23,6 +23,7 @@ export function CreateModal({
   const [hours, setHours] = useState<number>(24)
   const [customHours, setCustomHours] = useState('')
   const [custom, setCustom] = useState(false)
+  const [permanent, setPermanent] = useState(false)
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [err, setErr] = useState('')
@@ -31,14 +32,20 @@ export function CreateModal({
 
   async function submit() {
     setErr('')
-    const h = selectedHours
-    if (!Number.isInteger(h) || h < 1 || h > 720) {
-      setErr('时长须为 1~720 小时的整数')
-      return
+    if (!permanent) {
+      const h = selectedHours
+      if (!Number.isInteger(h) || h < 1 || h > 720) {
+        setErr('时长须为 1~720 小时的整数')
+        return
+      }
     }
     setSubmitting(true)
     try {
-      await createLink({ note: note || undefined, hours: h })
+      await createLink(
+        permanent
+          ? { note: note || undefined, permanent: true }
+          : { note: note || undefined, hours: selectedHours },
+      )
       onCreated()
       onClose()
     } catch (e) {
@@ -57,8 +64,9 @@ export function CreateModal({
               <button
                 key={q.hours}
                 type="button"
-                className={!custom && hours === q.hours ? 'chip chip-on' : 'chip'}
+                className={!custom && !permanent && hours === q.hours ? 'chip chip-on' : 'chip'}
                 onClick={() => {
+                  setPermanent(false)
                   setCustom(false)
                   setHours(q.hours)
                 }}
@@ -68,13 +76,27 @@ export function CreateModal({
             ))}
             <button
               type="button"
-              className={custom ? 'chip chip-on' : 'chip'}
-              onClick={() => setCustom(true)}
+              className={permanent ? 'chip chip-on' : 'chip'}
+              onClick={() => {
+                setPermanent(true)
+                setCustom(false)
+              }}
+            >
+              永久
+            </button>
+            <button
+              type="button"
+              className={custom && !permanent ? 'chip chip-on' : 'chip'}
+              onClick={() => {
+                setPermanent(false)
+                setCustom(true)
+              }}
             >
               自定义
             </button>
           </div>
-          {custom && (
+          {permanent && <span className="field-hint">永久链接不会自动过期，需手动吊销。</span>}
+          {custom && !permanent && (
             <input
               type="number"
               min={1}

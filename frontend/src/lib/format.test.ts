@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatBytes, formatDateTime, formatRelative } from './format'
+import { formatBytes, formatDateTime, formatExpiry, formatRelative, isPermanentExpiry } from './format'
 
 describe('formatBytes', () => {
   it('B 级', () => {
@@ -40,5 +40,19 @@ describe('formatDateTime', () => {
   it('格式 YYYY-MM-DD HH:mm（本地时区）', () => {
     const ts = new Date(2024, 0, 5, 9, 8).getTime()
     expect(formatDateTime(ts)).toBe('2024-01-05 09:08')
+  })
+})
+
+describe('永久链接（expires_at 哨兵 0）', () => {
+  it('isPermanentExpiry 仅认 0', () => {
+    expect(isPermanentExpiry(0)).toBe(true)
+    expect(isPermanentExpiry(1)).toBe(false)
+    expect(isPermanentExpiry(Date.now())).toBe(false)
+  })
+
+  it('formatExpiry：永久 → 「永久」，否则日期时间', () => {
+    expect(formatExpiry(0)).toBe('永久')
+    const ts = new Date(2024, 0, 5, 9, 8).getTime()
+    expect(formatExpiry(ts)).toBe('2024-01-05 09:08')
   })
 })

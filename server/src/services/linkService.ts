@@ -2,6 +2,7 @@ import type { Database } from 'better-sqlite3'
 import { toView, type LinksRepo } from '../db/linksRepo.js'
 import type { MonitoringRepo } from '../db/monitoringRepo.js'
 import { newLinkId, randomUuid } from '../lib/id.js'
+import { isPermanentExpiry, PERMANENT_EXPIRES_AT } from '../lib/expiry.js'
 import type { AuditAction, AuditDetail, CreateLinkInput, LinkRow, LinkView } from '../types.js'
 import type { XrayClient } from './xrayClient.js'
 
@@ -12,6 +13,9 @@ import type { XrayClient } from './xrayClient.js'
 // 状态机：active → expired | revoked；expired/revoked 不可再延长；revoked 不可逆（MVP，
 // 需求 §4 允许取舍：延长仅 active、revoked 不可复活）。
 // 说明：仅 extend 不触 xray（expires_at 纯控制面字段）；create/revoke 才需要数据面一致。
+//
+// 永久链接（permanent）：expires_at = PERMANENT_EXPIRES_AT(0)，永不过期（过期扫描跳过），
+//   因此也无需延长（extend 对永久链接报 400）。与 hours 互斥。
 //
 // extend 双语义（TASK-extend-regions.md 需求 1）：
 //   · hours 模式：相对延长，expires_at += hours*3600*1000（沿用 MAX_HOURS 上限）
@@ -78,11 +82,22 @@ export function createLinkService(deps: Deps): LinkService {
     })
   }
 
-  // ---- 输入校验（与 API 表一致：默认 hours=24；hours≤720）----
-  function normalizeInput(input: CreateLinkInput): { note: string; hours: number } {
+  // ---- 输入校验（与 API 表一致：默认 hours=24；hours≤720；permanent 与 hours 互斥）----
+  function normalizeInput(input: CreateLinkInput): {
+    note: string
+    hours: number
+    permanent: boolean
+  } {
     const note = typeof input.note === 'string' ? input.note.trim().slice(0, 500) : ''
-    const { hours } = input
-    if (hours !== undefined) {
+    const { hours, permanent } = input
+    if (permanent !== undefined && typeof permanent !== 'boolean') {
+      throw apiError(400, 'permanent 须为布尔值')
+    }
+    const isPermanent = permanent === true
+    if (isPermanent && hours !== undefined) {
+      throw apiError(400, '已选永久有效，不能再指定 hours（二选一）')
+    }
+    if (!isPermanent && hours !== undefined) {
       if (!Number.isInteger(hours) || hours < 1 || hours > limits.maxHours) {
         throw apiError(400, `时长须为 1~${limits.maxHours} 小时的整数`)
       }
@@ -90,16 +105,18 @@ export function createLinkService(deps: Deps): LinkService {
     return {
       note,
       hours: hours ?? limits.defaultHours,
+      permanent: isPermanent,
     }
   }
 
   async function create(input: CreateLinkInput, actor?: string): Promise<LinkView> {
-    const { note, hours } = normalizeInput(input)
+    const { note, hours, permanent } = normalizeInput(input)
     const id = newLinkId()
     const uuid = randomUuid()
     const email = id // email = id（xray 用户标识/账本 key，REQUIREMENTS.md §4）
     const createdAt = nowMs()
-    const expiresAt = createdAt + hours * 3600 * 1000
+    // 永久 → 哨兵 0（永不过期）；否则 创建时刻 + hours
+    const expiresAt = permanent ? PERMANENT_EXPIRES_AT : createdAt + hours * 3600 * 1000
     const row: LinkRow = {
       id,
       uuid,
@@ -116,7 +133,13 @@ export function createLinkService(deps: Deps): LinkService {
     // ① 先落 SQLite（事务）
     const insertTx = db.transaction(() => {
       repo.insert(row)
-      audit('create', id, { note: note || null, hours }, actor)
+      // 审计留痕：永久记 { permanent: true }，限时记 { hours }
+      audit(
+        'create',
+        id,
+        permanent ? { note: note || null, permanent: true } : { note: note || null, hours },
+        actor,
+      )
     })
     insertTx()
 
@@ -175,6 +198,10 @@ export function createLinkService(deps: Deps): LinkService {
   //     范围 sanity：不得早于当前时刻（不允许设过去时间）；距 now > 365 天拒绝（防误填）。
   async function extend(id: string, input: ExtendInput, actor?: string): Promise<LinkView> {
     const row = activeRow(id) // 延长仅 active（MVP）
+    // 永久链接没有到期时刻可延（哨兵 0），直接拒绝，避免把 0 当基准算出错误时间
+    if (isPermanentExpiry(row.expires_at)) {
+      throw apiError(400, '永久链接无需延长')
+    }
     const { expiresAt, hours } = input
     const hasHours = hours !== undefined
     const hasAbs = expiresAt !== undefined

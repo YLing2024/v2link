@@ -8,7 +8,10 @@ export interface Link {
   upBytes: number
   downBytes: number
   createdAt: number
+  /** 永久链接为哨兵 0；展示/判定请用 permanent */
   expiresAt: number
+  /** 永久有效（永不过期）；由后端按 expires_at 推导 */
+  permanent: boolean
   revokedAt: number | null
   status: LinkStatus
 }
@@ -22,6 +25,8 @@ export interface ApiResponse<T> {
 export interface CreateLinkBody {
   note?: string
   hours?: number
+  /** true = 永久有效（与 hours 互斥） */
+  permanent?: boolean
 }
 
 // ---- 监控/追溯/审计（TASK-monitoring.md A/B/C）----

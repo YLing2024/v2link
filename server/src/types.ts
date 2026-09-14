@@ -25,7 +25,10 @@ export interface LinkView {
   upBytes: number
   downBytes: number
   createdAt: number
+  /** 永久链接为哨兵 0（见 lib/expiry.ts）。展示与判定优先用 permanent 字段 */
   expiresAt: number
+  /** 永久有效（永不过期）；由 expires_at 推导，见 lib/expiry.ts */
+  permanent: boolean
   revokedAt: number | null
   status: LinkStatus
 }
@@ -43,6 +46,8 @@ export type DbLike = Pick<Database, 'prepare' | 'transaction' | 'exec'> | Databa
 export interface CreateLinkInput {
   note?: string
   hours?: number
+  /** true = 永久有效（与 hours 互斥）；缺省按 hours 计算到期时刻 */
+  permanent?: boolean
 }
 
 // ---- 监控/追溯/审计（TASK-monitoring.md A/B/C）----

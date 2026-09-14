@@ -1,5 +1,6 @@
 import type { Database } from 'better-sqlite3'
 import { getDb } from '../db/connection.js'
+import { isPermanentExpiry, PERMANENT_EXPIRES_AT } from '../lib/expiry.js'
 import type { DbLike, LinkRow, LinkStatus, LinkView } from '../types.js'
 
 // links 表数据访问：全部 prepared statement（禁字符串拼接 SQL）。
@@ -15,6 +16,8 @@ export function toView(row: LinkRow): LinkView {
     downBytes: Number(row.down_bytes),
     createdAt: Number(row.created_at),
     expiresAt: Number(row.expires_at),
+    // 永久语义由 expires_at 哨兵推导（见 lib/expiry.ts），前端优先用该布尔值
+    permanent: isPermanentExpiry(Number(row.expires_at)),
     revokedAt: row.revoked_at === null ? null : Number(row.revoked_at),
     status: row.status,
   }
@@ -53,7 +56,8 @@ function statements(db: Database): LinksRepo {
     'UPDATE links SET up_bytes = up_bytes + ?, down_bytes = down_bytes + ? WHERE id = ?',
   )
   const stmtActiveExpired = db.prepare(
-    `SELECT * FROM links WHERE status = 'active' AND expires_at < ?`,
+    // expires_at = PERMANENT_EXPIRES_AT(0) 为永久链接，永不进入过期集
+    `SELECT * FROM links WHERE status = 'active' AND expires_at > ? AND expires_at < ?`,
   )
   const stmtActiveByUuid = db.prepare(`SELECT * FROM links WHERE uuid = ? AND status = 'active'`)
   const stmtActiveByEmail = db.prepare(`SELECT * FROM links WHERE email = ? AND status = 'active'`)
@@ -89,7 +93,7 @@ function statements(db: Database): LinksRepo {
       return r?.status
     },
     findActiveExpired(now) {
-      return stmtActiveExpired.all(now).map((r) => r as unknown as LinkRow)
+      return stmtActiveExpired.all(PERMANENT_EXPIRES_AT, now).map((r) => r as unknown as LinkRow)
     },
     findActiveByUuid(uuid) {
       const r = stmtActiveByUuid.get(uuid) as unknown as LinkRow | undefined

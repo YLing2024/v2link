@@ -6,7 +6,7 @@ import type { RegionProbeService } from './regionProbe.js'
 import { parseStatsQuery } from '../lib/xrayStats.js'
 
 // 后台调度器（REQUIREMENTS.md §3.2/§3.3 + TASK-monitoring.md A/B + TASK-extend-regions.md 需求 2）：
-//   · 过期扫描：每 15s 扫 status='active' AND expires_at<now → 逐个 rmu + 标 expired
+//   · 过期扫描：每 15s 扫 status='active' AND expires_at<now（永久链接 expires_at=0 跳过）→ 逐个 rmu + 标 expired
 //   · 流量账本：每 30s statsquery -reset → delta 累加进 SQLite（links.up_bytes/down_bytes），
 //     同时写 traffic_samples 明细（流量曲线的数据源，A 层）
 //   · 地区连通性探测：每 5min 一轮 runRegionProbes（结果存内存，见 regionProbe.ts）

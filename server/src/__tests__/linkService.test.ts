@@ -268,6 +268,63 @@ describe('操作审计（C 层）', () => {
   })
 })
 
+// 永久有效（expires_at = 哨兵 0）—— 用户 2026-09-14 需求
+describe('永久链接（permanent）', () => {
+  it('create permanent → expires_at=0、view.permanent=true、status=active', async () => {
+    const { svc, repo } = makeService()
+    const link = await svc.create({ note: ' 长期 ', permanent: true })
+    expect(link.permanent).toBe(true)
+    expect(link.expiresAt).toBe(0)
+    expect(link.status).toBe('active')
+    expect(link.note).toBe('长期')
+    expect(repo.byId(link.id)!.expires_at).toBe(0)
+  })
+
+  it('create 非 permanent → permanent=false（默认路径不受影响）', async () => {
+    const { svc } = makeService()
+    const link = await svc.create({ hours: 2 })
+    expect(link.permanent).toBe(false)
+    expect(link.expiresAt).toBeGreaterThan(0)
+  })
+
+  it('审计 detail 记 { permanent: true }（而非 hours）', async () => {
+    const { svc, monitor } = makeService()
+    await svc.create({ permanent: true })
+    const rows = monitor.listAudit({ limit: 10, offset: 0 }).rows
+    const create = rows.find((r) => r.action === 'create')!
+    expect(create.detail as Record<string, unknown>).toMatchObject({ permanent: true })
+    expect((create.detail as Record<string, unknown>).hours).toBeUndefined()
+  })
+
+  it('permanent 与 hours 互斥 → 400', async () => {
+    const { svc } = makeService()
+    await expect(svc.create({ permanent: true, hours: 3 })).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('permanent 非布尔 → 400', async () => {
+    const { svc } = makeService()
+    await expect(
+      svc.create({ permanent: 'yes' as unknown as boolean }),
+    ).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('extend 永久链接 → 400「永久链接无需延长」', async () => {
+    const { svc } = makeService()
+    const link = await svc.create({ permanent: true })
+    await expect(svc.extend(link.id, { hours: 3 })).rejects.toMatchObject({ status: 400 })
+    await expect(
+      svc.extend(link.id, { expiresAt: 1_700_000_000_000 + 3600 * 1000 }),
+    ).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('永久链接仍可吊销（不因永久而不可逆）', async () => {
+    const { svc } = makeService()
+    const link = await svc.create({ permanent: true })
+    const revoked = await svc.revoke(link.id)
+    expect(revoked.status).toBe('revoked')
+  })
+})
+
 // HttpError 构造可用性
 describe('HttpError', () => {
   it('实例可携带 status', () => {
