@@ -5,6 +5,8 @@ export interface Link {
   id: string
   uuid: string
   note: string
+  /** 客户端节点名（vless #fragment）；空串 = 未设置，回退 note → id */
+  alias: string
   upBytes: number
   downBytes: number
   createdAt: number
@@ -24,6 +26,8 @@ export interface ApiResponse<T> {
 
 export interface CreateLinkBody {
   note?: string
+  /** 客户端节点名（写入 vless #fragment） */
+  alias?: string
   hours?: number
   /** true = 永久有效（与 hours 互斥） */
   permanent?: boolean

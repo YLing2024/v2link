@@ -12,6 +12,7 @@ export function toView(row: LinkRow): LinkView {
     id: row.id,
     uuid: row.uuid,
     note: row.note,
+    alias: row.alias ?? '',
     upBytes: Number(row.up_bytes),
     downBytes: Number(row.down_bytes),
     createdAt: Number(row.created_at),
@@ -46,8 +47,8 @@ export interface LinksRepo {
 
 function statements(db: Database): LinksRepo {
   const stmtInsert = db.prepare(
-    `INSERT INTO links (id, uuid, email, note, up_bytes, down_bytes, created_at, expires_at, revoked_at, status)
-     VALUES (@id, @uuid, @email, @note, @up_bytes, @down_bytes, @created_at, @expires_at, @revoked_at, @status)`,
+    `INSERT INTO links (id, uuid, email, note, alias, up_bytes, down_bytes, created_at, expires_at, revoked_at, status)
+     VALUES (@id, @uuid, @email, @note, @alias, @up_bytes, @down_bytes, @created_at, @expires_at, @revoked_at, @status)`,
   )
   const stmtById = db.prepare('SELECT * FROM links WHERE id = ?')
   const stmtStatus = db.prepare('SELECT status FROM links WHERE id = ?')

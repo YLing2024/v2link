@@ -51,4 +51,16 @@ describe('CreateModal', () => {
     expect(body.hours).toBe(1)
     expect(body.permanent).toBeUndefined()
   })
+
+  it('填别名 → 提交带 alias（永久档同样带上）', async () => {
+    createLinkMock.mockClear()
+    setup()
+    fireEvent.change(screen.getByPlaceholderText(/客户端里显示的节点名/), {
+      target: { value: '我的节点' },
+    })
+    fireEvent.click(screen.getByText('永久'))
+    fireEvent.click(screen.getByText('生成'))
+    await waitFor(() => expect(createLinkMock).toHaveBeenCalledTimes(1))
+    expect(createLinkMock.mock.calls[0]![0]).toMatchObject({ alias: '我的节点', permanent: true })
+  })
 })

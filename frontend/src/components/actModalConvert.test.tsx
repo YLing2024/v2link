@@ -17,6 +17,7 @@ function makeLink(over: Partial<Link> = {}): Link {
     id: 'lk_test',
     uuid: '00000000-0000-0000-0000-000000000000',
     note: '',
+    alias: '',
     upBytes: 0,
     downBytes: 0,
     createdAt: Date.now(),

@@ -3,8 +3,10 @@ import type { LinkRow } from '../types.js'
 // VLESS 链接构造：唯一依赖环境注入的 PUBLIC_HOST/PUBLIC_PATH（不硬编码域名）。
 // vless 解析说明（v2rayN/Shadowrocket/Clash/sing-box 全兼容）：
 //   host 参数 = WS 的 Host 头（与 TLS SNI 一致），不带端口；端口保留在主机段。
+//   #fragment = 客户端显示的节点名（别名）；按 RFC 3986 百分号编码，
+//   v2rayN/NG、Shadowrocket、sing-box 导入时都会 UrlDecode（含中文/空格安全）。
 // 格式（占位域名，仅示意）：
-//   vless://<uuid>@<host>:443?encryption=none&security=tls&type=ws&path=%2Fv2ws&host=<host>
+//   vless://<uuid>@<host>:443?encryption=none&security=tls&type=ws&path=%2Fv2ws&host=<host>#<别名>
 
 export interface VlessLinkParams {
   host: string
@@ -12,6 +14,8 @@ export interface VlessLinkParams {
   path: string
   security?: 'tls' | 'reality' | 'none'
   uuid: string
+  /** 客户端节点名（URL fragment）；空/缺省则不带 # */
+  alias?: string
 }
 
 export function buildVlessUri(p: VlessLinkParams): string {
@@ -29,7 +33,9 @@ export function buildVlessUri(p: VlessLinkParams): string {
   params.host = p.host
   const port = p.port ?? 443
   const qs = new URLSearchParams(params).toString()
-  return `vless://${p.uuid}@${p.host}:${port}?${qs}`
+  const uri = `vless://${p.uuid}@${p.host}:${port}?${qs}`
+  const alias = p.alias?.trim()
+  return alias ? `${uri}#${encodeURIComponent(alias)}` : uri
 }
 
 export function publicHost(): string {
@@ -40,12 +46,22 @@ export function publicPath(): string {
   return process.env.PUBLIC_PATH ?? '/v2ws'
 }
 
+/** 别名回退链：alias（客户端名）→ note（备注）→ id —— 保证导入客户端后节点有可辨识名字
+ *  逐级 trim 后判定非空（纯空白视为未设置，继续回退） */
+export function displayAlias(row: { alias?: string; note?: string; id?: string }): string {
+  for (const v of [row.alias, row.note, row.id]) {
+    const t = (v ?? '').trim()
+    if (t) return t
+  }
+  return ''
+}
+
 export function linkToVlessUri(
-  row: Pick<LinkRow, 'uuid'>,
+  row: Pick<LinkRow, 'uuid'> & { alias?: string; note?: string; id?: string },
   host = publicHost(),
   path = publicPath(),
 ): string {
-  return buildVlessUri({ host, path, uuid: row.uuid })
+  return buildVlessUri({ host, path, uuid: row.uuid, alias: displayAlias(row) })
 }
 
 // 构建 adu 所需的 xray inbound 配置片段。

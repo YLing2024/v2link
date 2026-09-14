@@ -357,6 +357,37 @@ describe('永久链接（permanent）', () => {
   })
 })
 
+// 别名（alias）—— 用户 2026-09-14 需求：vless #fragment = 客户端节点名
+describe('别名（alias）', () => {
+  it('create 带 alias → view.alias 原样返回（去首尾空白）', async () => {
+    const { svc, repo } = makeService()
+    const link = await svc.create({ note: '内网备注', alias: '  我的节点  ' })
+    expect(link.alias).toBe('我的节点')
+    expect(link.note).toBe('内网备注')
+    expect(repo.byId(link.id)!.alias).toBe('我的节点')
+  })
+
+  it('未传 alias → 空串（回退链交给前端）', async () => {
+    const { svc } = makeService()
+    expect((await svc.create({})).alias).toBe('')
+  })
+
+  it('alias 超长截断到 100；非字符串忽略', async () => {
+    const { svc } = makeService()
+    const long = 'x'.repeat(150)
+    expect((await svc.create({ alias: long })).alias).toHaveLength(100)
+    const weird = await svc.create({ alias: 123 as unknown as string })
+    expect(weird.alias).toBe('')
+  })
+
+  it('审计 detail 带 alias（非空时）', async () => {
+    const { svc, monitor } = makeService()
+    await svc.create({ alias: '节点A', hours: 1 })
+    const row = monitor.listAudit({ limit: 5, offset: 0 }).rows[0]!
+    expect(row.detail as Record<string, unknown>).toMatchObject({ alias: '节点A', hours: 1 })
+  })
+})
+
 // HttpError 构造可用性
 describe('HttpError', () => {
   it('实例可携带 status', () => {

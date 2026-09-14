@@ -131,6 +131,7 @@ export default function Dashboard() {
                       <td className="note-cell">
                         <span className="note-text">{l.note || '—'}</span>
                         <span className="mono id-sub">{l.id}</span>
+                        {l.alias && <span className="mono id-sub">别名：{l.alias}</span>}
                       </td>
                       <td>
                         <span className={`status-dot ${l.status}`} />
@@ -193,7 +194,7 @@ export default function Dashboard() {
       {modal?.kind === 'create' && (
         <CreateModal onClose={() => setModal(null)} onCreated={() => void refresh()} />
       )}
-      {modal?.kind === 'copy' && <CopyModal uuid={modal.link.uuid} onClose={() => setModal(null)} />}
+      {modal?.kind === 'copy' && <CopyModal link={modal.link} onClose={() => setModal(null)} />}
       {modal?.kind === 'extend' && (
         <ActModal
           link={modal.link}

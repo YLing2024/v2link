@@ -25,6 +25,7 @@ export function CreateModal({
   const [custom, setCustom] = useState(false)
   const [permanent, setPermanent] = useState(false)
   const [note, setNote] = useState('')
+  const [alias, setAlias] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [err, setErr] = useState('')
 
@@ -43,8 +44,8 @@ export function CreateModal({
     try {
       await createLink(
         permanent
-          ? { note: note || undefined, permanent: true }
-          : { note: note || undefined, hours: selectedHours },
+          ? { note: note || undefined, alias: alias || undefined, permanent: true }
+          : { note: note || undefined, alias: alias || undefined, hours: selectedHours },
       )
       onCreated()
       onClose()
@@ -108,6 +109,18 @@ export function CreateModal({
             />
           )}
         </div>
+
+        <label className="field">
+          <span className="field-label">别名</span>
+          <input
+            type="text"
+            className="input"
+            maxLength={100}
+            placeholder="客户端里显示的节点名（留空用备注）"
+            value={alias}
+            onChange={(e) => setAlias(e.target.value)}
+          />
+        </label>
 
         <label className="field">
           <span className="field-label">备注</span>
