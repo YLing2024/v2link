@@ -160,15 +160,13 @@ export default function Dashboard() {
                           </button>
                           {active && (
                             <>
-                              {!l.permanent && (
-                                <button
-                                  type="button"
-                                  className="btn btn-sm"
-                                  onClick={() => setModal({ kind: 'extend', link: l })}
-                                >
-                                  延长
-                                </button>
-                              )}
+                              <button
+                                type="button"
+                                className="btn btn-sm"
+                                onClick={() => setModal({ kind: 'extend', link: l })}
+                              >
+                                延长
+                              </button>
                               <button
                                 type="button"
                                 className="btn btn-sm btn-danger"

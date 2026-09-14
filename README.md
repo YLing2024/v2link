@@ -95,7 +95,7 @@ npm install && npm run build   # 产物由控制面自动托管（server/../fron
 | GET | `/api/links` | 全部链接 + 状态 + 上下行流量 |
 | POST | `/api/links` | 生成 `{ note?, hours?, permanent? }`（`permanent` 与 `hours` 二选一，写审计） |
 | POST | `/api/links/:id/revoke` | 吊销（立即从 xray 摘除，写审计） |
-| POST | `/api/links/:id/extend` | 延长：`{ hours }` 相对 或 `{ expiresAt }` 绝对（epoch ms，二选一，写审计；永久链接 400） |
+| POST | `/api/links/:id/extend` | 三选一：`{ hours }` 相对 / `{ expiresAt }` 绝对（epoch ms）/ `{ permanent: true }` 转永久（写审计） |
 | GET | `/api/regions/probes` | 地区连通性快照 + 最近 12 轮历史（需求 2，内存态） |
 | GET | `/api/links/:id/traffic?from=&to=&bucket=hour\|day` | 流量曲线桶（A；默认近 24h hour 桶） |
 | GET | `/api/links/:id/connections?q=&from=&to=&limit=&offset=` | 连接记录分页（B；q=域名前缀搜索） |
@@ -106,7 +106,9 @@ npm install && npm run build   # 产物由控制面自动托管（server/../fron
 
 > `extend` 的 `expiresAt`：epoch 毫秒整数；须晚于当前时间、且不早于当前时刻起 365 天（显式绝对时刻不设小时上限，允许提前缩短有效期）。`hours` 沿用 1~720 上限，在当前到期时刻基础上向后平移。
 
-> `permanent`（用户 2026-09-14 需求）：永久有效，永不过期，只能手动吊销。数据层用 `expires_at = 0` 作哨兵（单点定义见 `server/src/lib/expiry.ts`），过期扫描（每 15s）显式跳过；响应里 `permanent: boolean` 由 `expires_at` 推导，前端展示优先用它。与 `hours` 互斥（同传 400）；对永久链接调用 `extend` 返回 400「永久链接无需延长」。
+> `permanent`（用户 2026-09-14 需求）：永久有效，永不过期，只能手动吊销。数据层用 `expires_at = 0` 作哨兵（单点定义见 `server/src/lib/expiry.ts`），过期扫描（每 15s）显式跳过；响应里 `permanent: boolean` 由 `expires_at` 推导，前端展示优先用它。生成时与 `hours` 互斥（同传 400）。
+>
+> **双向转换**（同日晚追加）：`extend` 支持三选一 —— `{ hours }` 相对、`{ expiresAt }` 绝对、`{ permanent: true }` 转永久。限时 ↔ 永久 可互转：永久 → 限时用 `{ expiresAt }`（永久链接没有基准时刻，传 `{ hours }` 返回 400）；已是永久再传 `{ permanent: true }` 返回 400。转换同样写审计：转永久记 `{ permanent: true }`，永久转限时记 `{ from: 'permanent', expiresAt, expires_at }`。
 
 ## 地区连通性监控（需求 2）
 
