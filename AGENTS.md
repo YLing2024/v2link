@@ -14,7 +14,7 @@
 | 数据面 | xray-core（VLESS + WS inbound，官方 gRPC API 热管理） | `127.0.0.1:7895`，systemd `xray.service` |
 | 前端 | React 18 + Vite + TS | 构建到 `frontend/dist`，由控制面 `express.static` 托管 |
 
-对外：`v2.<自建域名>`（nginx `/v2ws` → xray，`/api/` → 控制面走 SSO 探针，`/` → 静态前端）。
+对外：`v2.<自建域名>`（nginx `/v2ws` → xray，`/api/` → Auth Gateway 鉴权后反代控制面并注入 `X-Auth-User`，`/` → 静态前端，公开）。
 
 ## 目录结构
 
@@ -29,7 +29,7 @@ server/src/
 └── __tests__/                      # vitest 用例（server 12 个 + frontend 8 个测试文件）
 frontend/src/
 ├── api.ts / App.tsx / types.ts
-├── lib/{sso,vless,format,datetime,trafficChart,regionProbe}.ts
+├── lib/{vless,format,datetime,trafficChart,regionProbe}.ts
 ├── components/{Dashboard,CreateModal,CopyModal,ActModal,LinkDetailModal,AuditModal,TrafficChart,RegionProbeBar,Modal}.tsx
 └── styles/style.css                # 唯一 CSS（设计令牌 + 全站）
 deploy/
@@ -59,7 +59,7 @@ systemctl restart v2link        # 控制面
 systemctl restart xray          # 只在改 deploy/xray.config.json 时需要
 ```
 
-- nginx：`v2.<自建域名>`（`deploy/v2link.conf` 是参考），`/api/` 走 `auth_request` 探针 → 认证中心 `127.0.0.1:3200/api/verify`。
+- nginx：`v2.<自建域名>`（`deploy/v2link.conf` 是参考），`/api/` 交给 Auth Gateway（`127.0.0.1:18920`）鉴权 → 网关注入 `X-Auth-User` 后反代控制面。配置里**不再有** `auth_request` / 探针 / `/auth-check`。
 - xray access log → `/var/log/xray/access.log`，轮转见 `deploy/xray-logrotate`（与控制面 7 天保留期对齐）。
 - 若配置了镜像域名，改 nginx 时几个域名体系要同步。
 
@@ -67,9 +67,9 @@ systemctl restart xray          # 只在改 deploy/xray.config.json 时需要
 
 真实值只存 `server/.env` / `frontend/.env`（均被 `.gitignore` 拦截），仓库只提交 `.env.example`。
 
-**server**：`PORT`(7897)、`HOST`(127.0.0.1)、`XRAY_API`(127.0.0.1:8081)、`XRAY_BIN`、`XRAY_INBOUND_TAG`(vless-in)、`XRAY_API_TIMEOUT_S`、`XRAY_API_RETRIES`、`DEFAULT_HOURS`(24)、`MAX_HOURS`(720)、`EXPIRE_SCAN_INTERVAL_S`(15)、`LEDGER_INTERVAL_S`(30)、`ACCESS_LOG_PATH`、`CONN_RETENTION_S`(7 天)、`SAMPLE_RETENTION_S`(30 天)、`REGION_PROBE_INTERVAL_S`(300)、`AUTH_CENTER_VERIFY_URL`、`DB_PATH`。
+**server**：`PORT`(7897)、`HOST`(127.0.0.1)、`XRAY_API`(127.0.0.1:8081)、`XRAY_BIN`、`XRAY_INBOUND_TAG`(vless-in)、`XRAY_API_TIMEOUT_S`、`XRAY_API_RETRIES`、`DEFAULT_HOURS`(24)、`MAX_HOURS`(720)、`EXPIRE_SCAN_INTERVAL_S`(15)、`LEDGER_INTERVAL_S`(30)、`ACCESS_LOG_PATH`、`CONN_RETENTION_S`(7 天)、`SAMPLE_RETENTION_S`(30 天)、`REGION_PROBE_INTERVAL_S`(300)、`DB_PATH`。
 
-**frontend**（构建时注入）：`VITE_AUTH_CENTER_URL`、`VITE_API_PROXY_TARGET`、`VITE_PUBLIC_HOST`、`VITE_PUBLIC_PATH`。
+**frontend**（构建时注入）：`VITE_API_PROXY_TARGET`、`VITE_PUBLIC_HOST`、`VITE_PUBLIC_PATH`。
 
 ## 架构要点
 
@@ -77,7 +77,7 @@ systemctl restart xray          # 只在改 deploy/xray.config.json 时需要
 - **调度器**（`scheduler.ts`）：过期扫描（15s）、流量账本累计（30s）、连接/采样清理、地区探测（300s）。新增定时任务挂在这里，别在 `index.ts` 里裸起 `setInterval`。
 - **连接追溯**：`accessLogTailer` 增量读 xray access log → `accessLogParse` 解析 → 写 `connections` 表（默认保留 7 天）。
 - **流量曲线**：每 30s 采样写 `traffic_samples`（保留 30 天），前端 `TrafficChart` 用轻量 SVG 渲染，`trafficChart.ts` 是纯函数（有单测）。
-- **鉴权**：生产主路径 = 信任 nginx 探针注入的 `X-Auth-User`；`AUTH_CENTER_VERIFY_URL` 仅用于无探针的直连场景（两层都配则任一通过）。
+- **鉴权**：登录与 SSO 全在 Auth Gateway（`127.0.0.1:18920`，nginx 反代进来）。本服务只读网关注入的 `X-Auth-User`，头缺失返回 401（不 302、不 500）。审计 `actor` 取该头值，缺省 `dev`（测试）。公开路径 `/`、`/v2ws` 不需要任何鉴权代码。
 
 ## 安全与仓库红线
 

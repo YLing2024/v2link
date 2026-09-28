@@ -1,10 +1,12 @@
 # v2link nginx 配置示例（部署模板）
-# 复制到 /etc/nginx/conf.d/v2link.conf 并把所有 <YOUR_DOMAIN> / <AUTH_SERVER> 换成实际值后：
+# 复制到 /etc/nginx/conf.d/v2link.conf 并把 <YOUR_DOMAIN> 换成实际值后：
 #   nginx -t && systemctl reload nginx
 #
-#   - /v2ws : VLESS WebSocket 入口 → xray 127.0.0.1:7895
-#   - /api/ : SSO 探针鉴权 → v2link 控制面 127.0.0.1:7897
-#   - /     : 前端静态（控制面托管）
+#   - /v2ws : VLESS WebSocket 入口 → xray 127.0.0.1:7895（公开，不需要登录）
+#   - /_auth/ : Auth Gateway 专用前缀（登录/回调/登出/me），必须排在其它 location 之前
+#   - /api/ : 交给 Auth Gateway（127.0.0.1:18920）鉴权，网关再反代到控制面并注入 X-Auth-User
+#   - /     : 前端静态（公开，控制面托管）
+# 这里不再有任何 auth_request / auth-check / ?token= 鉴权逻辑。
 
 server {
     server_name <YOUR_DOMAIN>;
@@ -20,33 +22,29 @@ server {
         proxy_send_timeout 300s;
     }
 
-    # ---- 控制面 API（SSO 探针保护）----
-    location /api/ {
-        set $auth_token $arg_token;
-        auth_request /auth-check;
-        auth_request_set $auth_user $upstream_http_x_auth_user;
-        proxy_pass http://127.0.0.1:7897;
+    # ---- Auth Gateway（登录/回调/登出/me）：必须排在其他 location 之前 ----
+    location /_auth/ {
+        proxy_pass http://127.0.0.1:18920;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Auth-User $auth_user;
     }
 
-    # ---- SSO 鉴权探针（内部，指向你的认证中心）----
-    location = /auth-check {
-        internal;
-        proxy_method GET;
-        proxy_pass http://127.0.0.1:<AUTH_SERVER_PORT>/api/verify;
-        proxy_pass_request_body off;
-        proxy_set_header Content-Length "";
-        proxy_set_header Content-Type "";
-        proxy_set_header Authorization $http_authorization;
-        proxy_set_header X-Auth-Token $auth_token;
+    # ---- 控制面 API：全部交给网关，鉴权通过后由网关反代并注入 X-Auth-User ----
+    location /api/ {
+        proxy_pass http://127.0.0.1:18920;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # ---- 前端 + SPA 回退 ----
+    # ---- 前端 + SPA 回退（公开）----
     location / {
         proxy_pass http://127.0.0.1:7897;
         proxy_set_header Host $host;
