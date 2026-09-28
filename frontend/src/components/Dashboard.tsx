@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { listLinks, revokeLink } from '../api'
-import { clearToken } from '../lib/sso'
+import { listLinks, logout, revokeLink } from '../api'
 import { formatBytes, formatDateTime, formatExpiry, formatRemaining } from '../lib/format'
 import type { Link } from '../types'
 import { CreateModal } from './CreateModal'
@@ -64,11 +63,6 @@ export default function Dashboard() {
     } finally {
       setBusy('')
     }
-  }
-
-  function logout() {
-    clearToken()
-    window.location.reload()
   }
 
   return (

@@ -1,7 +1,6 @@
-// 统一 API client：每次带 Authorization Bearer；401 → 清 token 并跳认证中心。
-// 与 admin-web/src/api.js 语义一致（REQUIREMENTS.md §6）。业务组件只调本文件。
+// 统一 API client：身份由 Auth Gateway 的站点会话 cookie 证明（同源自动携带），
+// 不再读写 localStorage token。全局唯一 401 处理：整页跳网关登录页。
 
-import { getToken, redirectToAuth } from './lib/sso'
 import type {
   AuditRecord,
   ConnectionRecord,
@@ -22,14 +21,25 @@ export class ApiError extends Error {
 export interface ApiOptions {
   method?: string
   body?: unknown
-  skipAuthRedirect?: boolean
+}
+
+let redirecting = false
+
+// 401 → 整页跳网关登录页，next 带回当前地址（pathname + search）
+export function redirectToLogin(): void {
+  if (redirecting) return
+  redirecting = true
+  const next = encodeURIComponent(window.location.pathname + window.location.search)
+  window.location.href = `/_auth/login?next=${next}`
+}
+
+// 退出：交给网关处理（清站点会话）
+export function logout(): void {
+  window.location.href = '/_auth/logout'
 }
 
 async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const headers: Record<string, string> = {}
-  const token = getToken()
-  if (token) headers.Authorization = `Bearer ${token}`
-
   const opts: RequestInit = { method: options.method ?? 'GET', headers }
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json'
@@ -44,9 +54,7 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
   }
 
   if (res.status === 401) {
-    if (!options.skipAuthRedirect) {
-      redirectToAuth()
-    }
+    redirectToLogin()
     throw new ApiError(401, data.error || '未登录或登录已过期')
   }
   if (!res.ok) {

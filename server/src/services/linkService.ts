@@ -74,8 +74,7 @@ export function createLinkService(deps: Deps): LinkService {
   const { db, repo, monitor, xray, limits } = deps
   const nowMs = deps.now ?? (() => Date.now())
 
-  // 操作审计：直连 dev token / 探针注入用户名 / 测试默认 → 缺省 'dev'
-  // （审计 §2：直连 dev token 场景 actor='dev'）。
+  // 操作审计：网关注入的用户名 / 测试默认 → 缺省 'dev'
   function audit(action: AuditAction, link_id: string | null, detail: AuditDetail, actor?: string) {
     monitor.insertAudit({
       ts: nowMs(),
