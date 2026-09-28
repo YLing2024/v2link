@@ -3,7 +3,7 @@ import { ZodError } from 'zod'
 import type { RegionProbeService } from '../services/regionProbe.js'
 
 // /api/regions/probes 路由（TASK-extend-regions.md 需求 2）：地区连通性快照 + 最近几轮历史。
-// 经 /api SSO 鉴权（与 links/audit 一致，见 app.ts）。
+// 经 /api 鉴权（与 links/audit 一致，见 app.ts）：只认网关注入的 X-Auth-User。
 // 响应 { ok, data: { updatedAt, probes:[{key,flag,name,ok,rttMs,error,ts}], history:[rounds] } }。
 // 数据来自 RegionProbeService 内存快照，不落库、无分页（量小：~4 地区 × 12 轮）。
 

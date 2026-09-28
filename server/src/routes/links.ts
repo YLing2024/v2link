@@ -10,7 +10,7 @@ import { aggregateTraffic, toTrafficSeries } from '../lib/trafficAgg.js'
 // 追溯两个子资源：
 //   GET /:id/traffic?from=&to=&bucket=hour|day → 流量曲线（30s 采样聚合，A 层）
 //   GET /:id/connections?from=&to=&q=&limit=&offset= → 连接记录分页（B 层）
-// actor 透传：中间件已把认证用户挂到 req.authUser（直连 dev token 场景 = 'dev'）。
+// actor 透传：中间件已把网关注入的认证用户挂到 req.authUser。
 
 function sendError(res: Response, e: unknown): void {
   if (e instanceof HttpError) {

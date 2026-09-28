@@ -11,9 +11,9 @@ import type { MonitoringRepo } from './db/monitoringRepo.js'
 import type { LinkService } from './services/linkService.js'
 import type { RegionProbeService } from './services/regionProbe.js'
 
-// Express app 组装：JSON 解析 → 静态托管 → /api/healthz（无鉴权）→ /api（探针鉴权）。
-// 生产拓扑：nginx 把 /api/* 走 auth-check 探针后反代到本服务并注入 X-Auth-User；
-// 本服务自身 auth 中间件做第二道防线（见 middleware/auth.ts）。
+// Express app 组装：JSON 解析 → /api/healthz（无鉴权）→ /api（网关注入 X-Auth-User）。
+// 生产拓扑：nginx 把 /api/* 交给 Auth Gateway（127.0.0.1:18920）鉴权，网关再反代到本服务并注入 X-Auth-User；
+// 本服务自身中间件只做「读头 + 缺失 401」（见 middleware/auth.ts）。
 // 静态资源：前端 build 产物（npm run build -w frontend → server/../frontend/dist），
 // 生产由本服务 express.static 托管（QuotaHub/需求 §7.5 模式）。
 
@@ -39,16 +39,8 @@ export function createApp(service: LinkService, monitor: MonitoringRepo, probe?:
   // 健康检查放最前（无鉴权）
   app.use('/api/healthz', createHealthRouter())
 
-  // 业务 API：SSO 探针鉴权
-  app.use(
-    '/api',
-    createAuthMiddleware({ verifyUrl: config.authVerifyUrl, devToken: config.devToken }),
-    (req, res, next) => {
-      // 路由装配在闭包内，req 上记录当前用户（供审计扩展预留）
-      void req.authUser
-      next()
-    },
-  )
+  // 业务 API：身份由 Auth Gateway 注入 X-Auth-User（缺失 401）
+  app.use('/api', createAuthMiddleware())
   app.use('/api/links', createLinksRouter(service, monitor))
   app.use('/api/audit', createAuditRouter(monitor))
   // 地区连通性探测（TASK-extend-regions.md 需求 2；regionProbe 缺省时 404 兜底）

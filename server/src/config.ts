@@ -36,21 +36,12 @@ const envSchema = z.object({
   CONN_RETENTION_S: z.coerce.number().int().min(3600).max(3600 * 24 * 30).default(3600 * 24 * 7),
   SAMPLE_CLEANUP_INTERVAL_S: z.coerce.number().int().min(60).max(3600 * 24).default(3600 * 24),
   SAMPLE_RETENTION_S: z.coerce.number().int().min(3600).max(3600 * 24 * 365).default(3600 * 24 * 30),
-  AUTH_CENTER_VERIFY_URL: z
-    .string()
-    .trim()
-    .url()
-    .default('http://127.0.0.1:8080/api/verify'),
   // 地区连通性探测（TASK-extend-regions.md 需求 2）：端点列表 JSON（见 REGION_PROBES 常量）。
   // 留空 = 用内置默认列表；探测失败不致命（状态条标红即可）。
   REGION_PROBES: z.string().trim().optional(),
   // 探测周期（秒，默认 300 = 每 5 分钟一轮）
   REGION_PROBE_INTERVAL_S: z.coerce.number().int().min(60).max(3600).default(300),
   DB_PATH: z.string().trim().optional(),
-  ENABLE_DEV_TOKEN: z
-    .string()
-    .optional()
-    .transform((v) => (v && v.trim() ? v.trim() : '')),
 })
 
 // 数据目录/库文件定位：
@@ -81,9 +72,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     connRetentionMs: p.CONN_RETENTION_S * 1000,
     sampleCleanupIntervalMs: p.SAMPLE_CLEANUP_INTERVAL_S * 1000,
     sampleRetentionMs: p.SAMPLE_RETENTION_S * 1000,
-    authVerifyUrl: p.AUTH_CENTER_VERIFY_URL,
     dbPath,
-    devToken: p.ENABLE_DEV_TOKEN,
     serverRoot,
     regionProbes: p.REGION_PROBES,
     regionProbeIntervalMs: p.REGION_PROBE_INTERVAL_S * 1000,
@@ -157,10 +146,7 @@ export interface Config {
   sampleCleanupIntervalMs: number
   /** traffic_samples 保留时长（默认 30 天） */
   sampleRetentionMs: number
-  authVerifyUrl: string
   dbPath: string
-  /** 本地无 nginx 直连调试令牌（空 = 关闭）。生产由 nginx 探针注入 X-Auth-User。 */
-  devToken: string
   serverRoot: string
   /** 地区连通性探测端点（.env REGION_PROBES 可覆盖；默认见 REGION_PROBES 常量） */
   regionProbes: string | undefined
