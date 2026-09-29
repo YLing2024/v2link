@@ -13,9 +13,7 @@ import type { LinkService } from './services/linkService.js'
 import type { RegionProbeService } from './services/regionProbe.js'
 
 // Express app 组装：JSON 解析 → /api/healthz（无鉴权）→ /api 认证入口（auth-mode 免鉴权；
-// builtin 走自带账号会话 / sso 只读 X-Auth-User，见 middleware/auth.ts）。
-// 生产拓扑：nginx 把 /api/* 交给 Auth Gateway（127.0.0.1:18920）鉴权，网关再反代到本服务并注入 X-Auth-User；
-// 本服务自身中间件只做「读头 + 缺失 401」（见 middleware/auth.ts）。
+// builtin 走自带账号会话 / sso 只读前置认证注入的 X-Auth-User，见 middleware/auth.ts）。
 // 静态资源：前端 build 产物（npm run build -w frontend → server/../frontend/dist），
 // 生产由本服务 express.static 托管（QuotaHub/需求 §7.5 模式）。
 
