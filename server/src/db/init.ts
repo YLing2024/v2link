@@ -76,6 +76,27 @@ export function initSchema(db: DbLike = getDb()): void {
     )
   `)
   db.exec('CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts)')
+
+  // 自带账号体系（AUTH_MODE=builtin，默认）：users + sessions。
+  //   users.password_hash 格式 scrypt$<saltHex>$<hashHex>（node:crypto scrypt，零新依赖）
+  //   sessions.expires_at 为 ISO 8601 UTC 文本，命中的会话滑动续期
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      username      TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at    TEXT NOT NULL
+    )
+  `)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      token      TEXT PRIMARY KEY,
+      username   TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    )
+  `)
+  db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)')
 }
 
 // 检测旧列存在（SQLite 3.35+ 语法）；兼容老库无列的情况

@@ -42,6 +42,16 @@ const envSchema = z.object({
   // 探测周期（秒，默认 300 = 每 5 分钟一轮）
   REGION_PROBE_INTERVAL_S: z.coerce.number().int().min(60).max(3600).default(300),
   DB_PATH: z.string().trim().optional(),
+  // ---- 管理端认证模式 ----
+  //   builtin（默认）：自带账号 + 会话；sso：关掉自带口令，身份只看 X-Auth-User。
+  //   未设置 / 取值非法 → 一律按 builtin（catch 兜底）。
+  AUTH_MODE: z.enum(['builtin', 'sso']).catch('builtin').default('builtin'),
+  // 首次启动（users 为空）创建的管理员用户名；已有用户时不覆盖口令。
+  V2LINK_ADMIN_USER: z.string().trim().min(1).default('admin'),
+  // 初始管理员口令；未设置则随机 16 位并在首次启动时 stdout 打印一次。
+  V2LINK_ADMIN_PASSWORD: z.string().optional(),
+  // 会话 TTL（小时，默认 12；命中滑动续期）。
+  SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(24 * 30).default(12),
 })
 
 // 数据目录/库文件定位：
@@ -76,6 +86,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     serverRoot,
     regionProbes: p.REGION_PROBES,
     regionProbeIntervalMs: p.REGION_PROBE_INTERVAL_S * 1000,
+    authMode: p.AUTH_MODE,
+    adminUser: p.V2LINK_ADMIN_USER,
+    adminPassword: p.V2LINK_ADMIN_PASSWORD,
+    sessionTtlMs: p.SESSION_TTL_HOURS * 3600 * 1000,
   }
 }
 
@@ -152,7 +166,18 @@ export interface Config {
   regionProbes: string | undefined
   /** 探测周期（默认 300s = 每 5 分钟一轮） */
   regionProbeIntervalMs: number
+  /** 认证模式：builtin（自带账号，默认）/ sso（身份只看 X-Auth-User） */
+  authMode: AuthMode
+  /** 首次启动创建的管理员用户名 */
+  adminUser: string
+  /** 管理员初始口令（未设置则随机生成并打印一次） */
+  adminPassword: string | undefined
+  /** 会话 TTL（毫秒，命中滑动续期） */
+  sessionTtlMs: number
 }
+
+/** 管理端认证模式：builtin = 自带账号会话；sso = 只认 X-Auth-User（前置认证层） */
+export type AuthMode = 'builtin' | 'sso'
 
 // 全局单例：进程启动时解析一次（测试请用 loadConfig 注入自定义 env，勿依赖本单例）
 export const config: Config = loadConfig()

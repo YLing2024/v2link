@@ -2,7 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import express, { type Express } from 'express'
 import { config } from './config.js'
-import { createAuthMiddleware } from './middleware/auth.js'
+import { createAuthMiddleware, defaultAuthDeps, type AuthDeps } from './middleware/auth.js'
+import { createAuthRouter } from './routes/auth.js'
 import { createLinksRouter } from './routes/links.js'
 import { createAuditRouter } from './routes/audit.js'
 import { createHealthRouter } from './routes/health.js'
@@ -11,7 +12,8 @@ import type { MonitoringRepo } from './db/monitoringRepo.js'
 import type { LinkService } from './services/linkService.js'
 import type { RegionProbeService } from './services/regionProbe.js'
 
-// Express app 组装：JSON 解析 → /api/healthz（无鉴权）→ /api（网关注入 X-Auth-User）。
+// Express app 组装：JSON 解析 → /api/healthz（无鉴权）→ /api 认证入口（auth-mode 免鉴权；
+// builtin 走自带账号会话 / sso 只读 X-Auth-User，见 middleware/auth.ts）。
 // 生产拓扑：nginx 把 /api/* 交给 Auth Gateway（127.0.0.1:18920）鉴权，网关再反代到本服务并注入 X-Auth-User；
 // 本服务自身中间件只做「读头 + 缺失 401」（见 middleware/auth.ts）。
 // 静态资源：前端 build 产物（npm run build -w frontend → server/../frontend/dist），
@@ -31,7 +33,12 @@ function resolveFrontendDist(): string | null {
   return null
 }
 
-export function createApp(service: LinkService, monitor: MonitoringRepo, probe?: RegionProbeService): Express {
+export function createApp(
+  service: LinkService,
+  monitor: MonitoringRepo,
+  probe?: RegionProbeService,
+  auth: AuthDeps = defaultAuthDeps(),
+): Express {
   const app = express()
   app.disable('x-powered-by')
   app.use(express.json({ limit: '64kb' }))
@@ -39,8 +46,11 @@ export function createApp(service: LinkService, monitor: MonitoringRepo, probe?:
   // 健康检查放最前（无鉴权）
   app.use('/api/healthz', createHealthRouter())
 
-  // 业务 API：身份由 Auth Gateway 注入 X-Auth-User（缺失 401）
-  app.use('/api', createAuthMiddleware())
+  // 认证入口（auth-mode 免鉴权；login/logout/me 见 routes/auth.ts）——必须在鉴权中间件之前
+  app.use('/api', createAuthRouter(auth))
+
+  // 业务 API：builtin 校验会话 / sso 读 X-Auth-User（缺失 401）
+  app.use('/api', createAuthMiddleware(auth))
   app.use('/api/links', createLinksRouter(service, monitor))
   app.use('/api/audit', createAuditRouter(monitor))
   // 地区连通性探测（地区连通性监控；regionProbe 缺省时 404 兜底）

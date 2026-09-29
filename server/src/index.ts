@@ -5,6 +5,7 @@ import { initSchema } from './db/init.js'
 import { createLinksRepo } from './db/linksRepo.js'
 import { createMonitoringRepo } from './db/monitoringRepo.js'
 import { createApp } from './app.js'
+import { createAccountService } from './services/accountService.js'
 import { xrayClient } from './services/xrayClient.js'
 import { createLinkService } from './services/linkService.js'
 import { Scheduler } from './services/scheduler.js'
@@ -32,6 +33,22 @@ const service = createLinkService({
 // 地区连通性监控（地区连通性监控）：端点来自配置（默认内置 / REGION_PROBES 覆盖）
 const regionProbe = createRegionProbeService({ probes: parseRegionProbes(config.regionProbes) })
 
+// 认证模式：启动打印一行；builtin 下首次启动（users 为空）创建初始管理员并打印一次口令。
+const accounts = createAccountService(db, { sessionTtlMs: config.sessionTtlMs })
+console.log(`AUTH_MODE=${config.authMode}`)
+if (config.authMode === 'builtin') {
+  accounts.cleanupExpiredSessions()
+  const boot = accounts.bootstrapAdmin(config.adminUser, config.adminPassword)
+  if (boot.created) {
+    console.log(`[auth] 首次启动已创建管理员账号: ${config.adminUser}`)
+    if (boot.password) {
+      console.log(`[auth] 初始口令: ${boot.password}（仅本次打印，请立即保存）`)
+    }
+  }
+} else {
+  console.log('[auth] 自带口令已关闭，身份由 X-Auth-User 决定')
+}
+
 const scheduler = new Scheduler({
   db,
   repo,
@@ -58,7 +75,10 @@ const tailer = new AccessLogTailer({
   sink: (rows) => monitor.insertConnections(rows),
 })
 
-const app = createApp(service, monitor, regionProbe)
+const app = createApp(service, monitor, regionProbe, {
+  mode: config.authMode,
+  accounts,
+})
 const server = app.listen(config.port, config.host, () => {
   console.log(`v2link 控制面已启动: http://${config.host}:${config.port}`)
   console.log(
