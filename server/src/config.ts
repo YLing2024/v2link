@@ -52,6 +52,10 @@ const envSchema = z.object({
   V2LINK_ADMIN_PASSWORD: z.string().optional(),
   // 会话 TTL（小时，默认 12；命中滑动续期）。
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(24 * 30).default(12),
+  // 反代信任范围（Express trust proxy）。默认 loopback：只信本机反代（nginx 在本机时
+  // req.ip 才是真实访客 IP；否则登录限速会把所有访客算成同一个 IP，一人失败十次锁死全体）。
+  // 'false' = 不信任任何转发头；'true' = 信任全部（仅当服务不直接对外时使用）。
+  TRUST_PROXY: z.string().trim().default('loopback'),
 })
 
 // 数据目录/库文件定位：
@@ -90,7 +94,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     adminUser: p.V2LINK_ADMIN_USER,
     adminPassword: p.V2LINK_ADMIN_PASSWORD,
     sessionTtlMs: p.SESSION_TTL_HOURS * 3600 * 1000,
+    trustProxy: parseTrustProxy(p.TRUST_PROXY),
   }
+}
+
+// trust proxy 取值解析：Express 接受 boolean / number / string（预设名或子网列表）。
+function parseTrustProxy(raw: string): boolean | number | string {
+  const v = raw.trim().toLowerCase()
+  if (v === 'false' || v === '0' || v === 'off') return false
+  if (v === 'true' || v === '1' || v === 'on') return true
+  if (/^\d+$/.test(v)) return Number(v)
+  return v || 'loopback'
 }
 
 // 地区连通性探测默认端点（服务器直连各地区知名稳定 HTTPS 端点，HTTP(S) 测 RTT）。
@@ -174,6 +188,8 @@ export interface Config {
   adminPassword: string | undefined
   /** 会话 TTL（毫秒，命中滑动续期） */
   sessionTtlMs: number
+  /** Express trust proxy 取值（见 envSchema.TRUST_PROXY 注释） */
+  trustProxy: boolean | number | string
 }
 
 /** 管理端认证模式：builtin = 自带账号会话；sso = 只认 X-Auth-User（前置认证层） */
