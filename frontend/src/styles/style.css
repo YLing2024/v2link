@@ -675,6 +675,21 @@ button {
   color: var(--fg);
 }
 
+/* 本地登录表单（AUTH_MODE=builtin） */
+.login-form {
+  width: 260px;
+  margin-top: 22px;
+  text-align: left;
+}
+
+.login-form .field {
+  margin-bottom: 14px;
+}
+
+.login-form .form-error {
+  margin-bottom: 12px;
+}
+
 /* ---------- 链接详情 / 审计 ---------- */
 .detail-block {
   margin-bottom: 22px;

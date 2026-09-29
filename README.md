@@ -8,12 +8,12 @@
 - **全客户端兼容**：v2rayN / Shadowrocket / Clash / sing-box 等主流客户端开箱即用
 - **生命周期管理**：到期自动失效；随时吊销、延长（支持小时相对延长 / 自定义绝对到期时刻）
 - **精确流量账本**：每链接上下行流量独立统计（SQLite 持久化，重启不丢）
-- **网关注入身份的管理后台**：登录 / SSO 交给 Auth Gateway，只有你能管理
+- **默认自带账号密码**，开箱即用；也可以关掉自带口令（`AUTH_MODE=sso`）
 - **数据面热管理**：基于 xray 官方管理 API，加删用户**无需重启、不断存量连接**
 - **底部全球连通性监控**：服务器每 5 分钟直连美国/欧洲/日本/新加坡等主流地区 HTTPS 端点测延迟，底部固定状态条实时展示
 - **历史流量曲线**：每 30s 采样一次，Dashboard 单链接查看近 24h / 7d / 30d 用量趋势（轻量 SVG）
 - **连接记录追溯**：消费 xray access log，追溯“谁、何时、连过哪个目标”；保留 7 天
-- **操作审计**：后台生成 / 吊销 / 延长全部留痕（操作人 = 网关注入的 `X-Auth-User` / dev）
+- **操作审计**：后台生成 / 吊销 / 延长全部留痕（操作人 = 当前登录身份，缺省 `dev`）
 
 ## 架构
 
@@ -23,7 +23,7 @@
    ▼
 nginx :443  (TLS 终结)
    ├── /v2ws   → xray (VLESS+WS inbound, 出口 freedom 直连)
-   ├── /api/*  → Auth Gateway 鉴权后反代控制面 (Express + SQLite, 注入 X-Auth-User)
+   ├── /api/*  → 控制面 (Express + SQLite，认证模式见下)
    └── /       → 前端静态(控制面托管 build 产物)
 
 控制面(Node/TS): SQLite(权威账本) ⇄ xray api CLI (adu/rmu/statsquery 热管理)
@@ -54,7 +54,6 @@ nginx :443  (TLS 终结)
 
 - Node.js ≥ 20
 - [xray-core](https://github.com/XTLS/Xray-core) ≥ 26.3（含 `xray api` 子命令；`xray version` 验证）
-- 一个 Auth Gateway（`127.0.0.1:18920`，nginx 反代进来；登录 / SSO / 会话都在它那里）
 
 ### 1. 数据面：xray
 
@@ -71,7 +70,7 @@ cp deploy/xray-logrotate /etc/logrotate.d/xray-access
 
 ```bash
 cd server
-cp .env.example .env    # 按需修改（端口、xray 地址、认证中心 URL、ACCESS_LOG_PATH/保留期）
+cp .env.example .env    # 按需修改（端口、xray 地址、认证模式、ACCESS_LOG_PATH/保留期）
 npm install
 npm run build && npm start
 ```
@@ -101,8 +100,16 @@ npm install && npm run build   # 产物由控制面自动托管（server/../fron
 | GET | `/api/links/:id/connections?q=&from=&to=&limit=&offset=` | 连接记录分页（B；q=域名前缀搜索） |
 | GET | `/api/audit?limit=&offset=` | 操作审计分页（C） |
 | GET | `/api/healthz` | 健康检查（无鉴权） |
+| GET | `/api/auth-mode` | 当前认证模式（无鉴权） |
 
-全部 API（除 healthz）需要登录：生产环境由 nginx 把 `/api/*` 交给 Auth Gateway，网关鉴权后注入 `X-Auth-User` 再反代本服务；本服务只认该头，缺失返回 401。审计 `actor` 取 `X-Auth-User`，缺省 `dev`（测试）。公开路径 `/`、`/v2ws` 不需要任何鉴权。
+鉴权模式（`AUTH_MODE`）：
+
+| 模式 | 说明 |
+|---|---|
+| `builtin`（默认） | 自带账号密码，开箱即用 |
+| `sso` | 关掉自带口令，身份由 `X-Auth-User` 决定——自家项目接 SSO 时走这一档 |
+
+关掉后的登录跳转与 401 由你前面的认证层决定，本服务不再展开。公开路径 `/`、`/v2ws` 不需要任何鉴权。
 
 > `extend` 的 `expiresAt`：epoch 毫秒整数；须晚于当前时间、且不早于当前时刻起 365 天（显式绝对时刻不设小时上限，允许提前缩短有效期）。`hours` 沿用 1~720 上限，在当前到期时刻基础上向后平移。
 

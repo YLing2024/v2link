@@ -1,5 +1,7 @@
-// 统一 API client：身份由 Auth Gateway 的站点会话 cookie 证明（同源自动携带），
-// 不再读写 localStorage token。全局唯一 401 处理：整页跳网关登录页。
+// 统一 API client。认证模式由后端 /api/auth-mode 决定（启动探测一次并缓存）：
+//   builtin：自带账号会话（HttpOnly cookie，同源自动携带）；401 切回本地登录页。
+//   sso：关掉自带口令，身份由前置认证层决定；401 整页跳 /_auth/login?next=...
+// 探测失败一律按 sso 处理（绝不回退 builtin）。
 
 import type {
   AuditRecord,
@@ -12,9 +14,12 @@ import type {
 
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  /** 429 时服务端给出的重试秒数 */
+  retryAfter?: number
+  constructor(status: number, message: string, retryAfter?: number) {
     super(message)
     this.status = status
+    this.retryAfter = retryAfter
   }
 }
 
@@ -23,24 +28,98 @@ export interface ApiOptions {
   body?: unknown
 }
 
+export type AuthMode = 'builtin' | 'sso'
+
+export interface AuthUser {
+  name: string
+}
+
+// ---- 认证模式探测（缓存；失败按 sso）----
+let authModePromise: Promise<AuthMode> | null = null
+
+export function getAuthMode(): Promise<AuthMode> {
+  if (!authModePromise) {
+    authModePromise = fetch('/api/auth-mode', { credentials: 'same-origin' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { authMode?: string } | null) =>
+        data?.authMode === 'builtin' ? ('builtin' as const) : ('sso' as const),
+      )
+      .catch(() => 'sso' as const)
+  }
+  return authModePromise
+}
+
+// builtin 下 401 的本地回调（App 挂载：切回登录页）
+let onUnauthorized: (() => void) | null = null
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  onUnauthorized = fn
+}
+
 let redirecting = false
 
-// 401 → 整页跳网关登录页，next 带回当前地址（pathname + search）
+// sso：401 → 整页跳前置认证登录页，next 带回当前地址（已在 /_auth/ 页面上不再重复跳，防 next 嵌套）
 export function redirectToLogin(): void {
   if (redirecting) return
+  if (window.location.pathname.startsWith('/_auth/')) return
   redirecting = true
   const next = encodeURIComponent(window.location.pathname + window.location.search)
   window.location.href = `/_auth/login?next=${next}`
 }
 
-// 退出：交给网关处理（清站点会话）
-export function logout(): void {
-  window.location.href = '/_auth/logout'
+/** builtin：登录本地账号 */
+export async function login(username: string, password: string): Promise<AuthUser> {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  const data = (await res.json().catch(() => ({}))) as {
+    error?: string
+    retryAfter?: number
+    user?: { name?: string }
+  }
+  if (res.status === 429) {
+    throw new ApiError(429, data.error || '尝试过于频繁，请稍后再试', data.retryAfter)
+  }
+  if (!res.ok) throw new ApiError(res.status, data.error || `HTTP ${res.status}`)
+  return { name: data.user?.name ?? username }
+}
+
+/** builtin：当前登录用户；未登录返回 null */
+export async function me(): Promise<AuthUser | null> {
+  const res = await fetch('/api/auth/me', { credentials: 'same-origin' })
+  if (!res.ok) return null
+  const data = (await res.json().catch(() => null)) as {
+    name?: string
+    user?: { name?: string }
+  } | null
+  const name = data?.name ?? data?.user?.name
+  return name ? { name } : null
+}
+
+/** 退出：按模式分发（sso 交给前置认证层；builtin 清本地会话并切回登录页） */
+export async function logout(): Promise<void> {
+  const mode = await getAuthMode()
+  if (mode === 'sso') {
+    window.location.href = '/_auth/logout'
+    return
+  }
+  try {
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' })
+  } catch {
+    // 网络失败也切回登录页；cookie 仍由服务端会话决定
+  }
+  onUnauthorized?.()
 }
 
 async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const headers: Record<string, string> = {}
-  const opts: RequestInit = { method: options.method ?? 'GET', headers }
+  const opts: RequestInit = {
+    method: options.method ?? 'GET',
+    headers,
+    credentials: 'same-origin',
+  }
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json'
     opts.body = JSON.stringify(options.body)
@@ -54,7 +133,9 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
   }
 
   if (res.status === 401) {
-    redirectToLogin()
+    const mode = await getAuthMode()
+    if (mode === 'sso') redirectToLogin()
+    else onUnauthorized?.()
     throw new ApiError(401, data.error || '未登录或登录已过期')
   }
   if (!res.ok) {

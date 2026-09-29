@@ -14,7 +14,7 @@
 | 数据面 | xray-core（VLESS + WS inbound，官方 gRPC API 热管理） | `127.0.0.1:7895`，systemd `xray.service` |
 | 前端 | React 18 + Vite + TS | 构建到 `frontend/dist`，由控制面 `express.static` 托管 |
 
-对外：`v2.<自建域名>`（nginx `/v2ws` → xray，`/api/` → Auth Gateway 鉴权后反代控制面并注入 `X-Auth-User`，`/` → 静态前端，公开）。
+对外：`v2.<自建域名>`（nginx `/v2ws` → xray，`/api/` → 控制面（默认 `AUTH_MODE=builtin` 自带账号；`sso` 时由前置认证注入 `X-Auth-User`），`/` → 静态前端，公开）。
 
 ## 目录结构
 
@@ -24,13 +24,13 @@ server/src/
 ├── db/{connection,init,linksRepo,monitoringRepo}.ts
 ├── lib/{vless,id,expiry,xrayStats,accessLogParse,accessLogTailer,trafficAgg}.ts
 ├── middleware/auth.ts
-├── routes/{links,health,regions,audit}.ts
-├── services/{linkService,xrayClient,scheduler,regionProbe}.ts
-└── __tests__/                      # vitest 用例（server 12 个 + frontend 8 个测试文件）
+├── routes/{links,health,regions,audit,auth}.ts
+├── services/{linkService,xrayClient,scheduler,regionProbe,accountService}.ts
+└── __tests__/                      # vitest 用例（server 13 个 + frontend 7 个测试文件）
 frontend/src/
 ├── api.ts / App.tsx / types.ts
 ├── lib/{vless,format,datetime,trafficChart,regionProbe}.ts
-├── components/{Dashboard,CreateModal,CopyModal,ActModal,LinkDetailModal,AuditModal,TrafficChart,RegionProbeBar,Modal}.tsx
+├── components/{Dashboard,CreateModal,CopyModal,ActModal,LinkDetailModal,AuditModal,TrafficChart,RegionProbeBar,Modal,Login}.tsx
 └── styles/style.css                # 唯一 CSS（设计令牌 + 全站）
 deploy/
 ├── xray.config.json                # xray 侧配置（api.listen 127.0.0.1:8081）
@@ -59,7 +59,7 @@ systemctl restart v2link        # 控制面
 systemctl restart xray          # 只在改 deploy/xray.config.json 时需要
 ```
 
-- nginx：`v2.<自建域名>`（`deploy/v2link.conf` 是参考），`/api/` 交给 Auth Gateway（`127.0.0.1:18920`）鉴权 → 网关注入 `X-Auth-User` 后反代控制面。配置里**不再有** `auth_request` / 探针 / `/auth-check`。
+- nginx：`v2.<自建域名>`（`deploy/v2link.conf` 是参考）。`/api/` 认证模式二选一：`builtin`（默认，控制面自带账号）或 `sso`（交给前置认证，注入 `X-Auth-User` 后反代控制面）。配置里**不再有** `auth_request` / 探针 / `/auth-check`。
 - xray access log → `/var/log/xray/access.log`，轮转见 `deploy/xray-logrotate`（与控制面 7 天保留期对齐）。
 - 若配置了镜像域名，改 nginx 时几个域名体系要同步。
 
@@ -67,7 +67,7 @@ systemctl restart xray          # 只在改 deploy/xray.config.json 时需要
 
 真实值只存 `server/.env` / `frontend/.env`（均被 `.gitignore` 拦截），仓库只提交 `.env.example`。
 
-**server**：`PORT`(7897)、`HOST`(127.0.0.1)、`XRAY_API`(127.0.0.1:8081)、`XRAY_BIN`、`XRAY_INBOUND_TAG`(vless-in)、`XRAY_API_TIMEOUT_S`、`XRAY_API_RETRIES`、`DEFAULT_HOURS`(24)、`MAX_HOURS`(720)、`EXPIRE_SCAN_INTERVAL_S`(15)、`LEDGER_INTERVAL_S`(30)、`ACCESS_LOG_PATH`、`CONN_RETENTION_S`(7 天)、`SAMPLE_RETENTION_S`(30 天)、`REGION_PROBE_INTERVAL_S`(300)、`DB_PATH`。
+**server**：`PORT`(7897)、`HOST`(127.0.0.1)、`XRAY_API`(127.0.0.1:8081)、`XRAY_BIN`、`XRAY_INBOUND_TAG`(vless-in)、`XRAY_API_TIMEOUT_S`、`XRAY_API_RETRIES`、`DEFAULT_HOURS`(24)、`MAX_HOURS`(720)、`EXPIRE_SCAN_INTERVAL_S`(15)、`LEDGER_INTERVAL_S`(30)、`ACCESS_LOG_PATH`、`CONN_RETENTION_S`(7 天)、`SAMPLE_RETENTION_S`(30 天)、`REGION_PROBE_INTERVAL_S`(300)、`DB_PATH`、`AUTH_MODE`(builtin)、`V2LINK_ADMIN_USER`(admin)、`V2LINK_ADMIN_PASSWORD`、`SESSION_TTL_HOURS`(12)。
 
 **frontend**（构建时注入）：`VITE_API_PROXY_TARGET`、`VITE_PUBLIC_HOST`、`VITE_PUBLIC_PATH`。
 
@@ -77,7 +77,7 @@ systemctl restart xray          # 只在改 deploy/xray.config.json 时需要
 - **调度器**（`scheduler.ts`）：过期扫描（15s）、流量账本累计（30s）、连接/采样清理、地区探测（300s）。新增定时任务挂在这里，别在 `index.ts` 里裸起 `setInterval`。
 - **连接追溯**：`accessLogTailer` 增量读 xray access log → `accessLogParse` 解析 → 写 `connections` 表（默认保留 7 天）。
 - **流量曲线**：每 30s 采样写 `traffic_samples`（保留 30 天），前端 `TrafficChart` 用轻量 SVG 渲染，`trafficChart.ts` 是纯函数（有单测）。
-- **鉴权**：登录与 SSO 全在 Auth Gateway（`127.0.0.1:18920`，nginx 反代进来）。本服务只读网关注入的 `X-Auth-User`，头缺失返回 401（不 302、不 500）。审计 `actor` 取该头值，缺省 `dev`（测试）。公开路径 `/`、`/v2ws` 不需要任何鉴权代码。
+- **鉴权（双模式，`AUTH_MODE`）**：`builtin`（默认）由控制面自带账号——`services/accountService.ts` 管 users/sessions（scrypt 口令、会话 12h 滑动续期），`routes/auth.ts` 暴露 `/api/auth-mode`（免鉴权）+ `/api/auth/login|logout|me`；中间件接受 cookie `v2link_session` 或 `Authorization: Bearer`，**忽略** `X-Auth-User`。`sso` 关掉自带口令，只认前置认证注入的 `X-Auth-User`，`auth/login|logout|me` 一律 404。两模式缺失凭证都返回 401（不 302、不 500）；审计 `actor` 取当前身份，缺省 `dev`（测试）。公开路径 `/`、`/v2ws`、`/api/auth-mode` 不需要鉴权。非法 `AUTH_MODE` 一律回落 `builtin`。
 
 ## 安全与仓库红线
 
