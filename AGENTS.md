@@ -105,6 +105,7 @@ systemctl restart xray          # 只在改 deploy/xray.config.json 时需要
 - `db/init.ts` 负责建表/迁移，改 schema 要在这里加迁移，别假设旧库会自动升级。
 - 前端 dev 需要后端在 7897；`/api` 代理目标由 `VITE_API_PROXY_TARGET` 控制。
 - 账号流量统计来自 xray 的 stats API，采样周期与账本周期不同步时曲线会有台阶，属正常。
+- **认证不再有认证中心 verify/探针配置**：`AUTH_CENTER_VERIFY_URL`、`ENABLE_DEV_TOKEN` 与后端直连 `/api/verify` 已于 2026-09-29 全部移除；认证只走 `AUTH_MODE`（`builtin` 自带账号 / `sso` 只认 `X-Auth-User`）。见到旧键或 `auth_request` / `/auth-check` 一律按过时处理，不要重新引入。
 
 ## 项目记忆（PROJECT_MEMORY.md）
 
