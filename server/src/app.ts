@@ -39,6 +39,8 @@ export function createApp(
 ): Express {
   const app = express()
   app.disable('x-powered-by')
+  // 反代信任范围：登录限速按 req.ip 计数，反代场景必须让它拿到真实访客 IP
+  app.set('trust proxy', config.trustProxy)
   app.use(express.json({ limit: '64kb' }))
 
   // 健康检查放最前（无鉴权）
