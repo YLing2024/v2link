@@ -14,7 +14,8 @@ import { buildInboundFragment } from '../lib/vless.js'
 //  - adu：输入必须为「顶层含 inbounds 数组」的完整配置片段（写成临时文件传参），
 //    inbound tag 写在片段 inbounds[0].tag（**adu 命令行无 -tag flag，加了会报错**）。
 //    返回 "Added N user(s)"；**退出码对业务失败不敏感**：
-//      · 重复 email 不覆盖更新 —— stdout 报 "already exists" 且 Added 0，exit 仍 0
+//      · 重复 email 不覆盖更新 —— stdout 报 "already exists" 且 Added 0，exit 仍 0；
+//        本类按幂等处理：视为成功并返回 false（无实际新增），见 addUser 注释（需求文档 R1）。
 //      · 结构错误（缺 inbounds 包装）—— 只打 "Added 0 user(s)"，exit 仍 0
 //    因此必须以 stdout 里 "Added N" 判定成功，不能只看 exit code。
 //  - rmu：-tag 后跟 email；删不存在的用户 exit 0（"Removed 0 user(s)"），幂等无害。
@@ -87,19 +88,20 @@ export class XrayClient {
   }
 
   /** 加用户。xray 以 stdout "Added N user(s)" 判定成功（exit code 不可靠，见文件头注释）。
-   *  注意：adu 不接受 -tag 参数，inbound tag 写在 JSON 片段的 inbounds[0].tag 里。 */
-  async addUser(spec: XrayUserSpec): Promise<void> {
+   *  注意：adu 不接受 -tag 参数，inbound tag 写在 JSON 片段的 inbounds[0].tag 里。
+   *  幂等语义（需求文档 R1）：email 已存在时 xray 返回 "already exists" 且 Added 0，
+   *  视为**成功**并返回 false（无实际新增）；真正新增返回 true。其余 Added 0 仍抛错。
+   *  返回值用于 reconcile 区分「实际补回」与「本来就在」，避免稳态下每轮误报动作、造成日志洪水。 */
+  async addUser(spec: XrayUserSpec): Promise<boolean> {
     const file = writeTempFragment(spec, this.inboundTag)
     try {
       const out = await this.run('adu', [file])
       const m = /Added\s+(\d+)\s+user/i.exec(out)
       const added = m ? Number(m[1]) : 0
-      if (added < 1) {
-        const reason = /already exists/i.test(out)
-          ? 'xray 用户已存在（adu 不覆盖，需先 rmu）'
-          : `adu 未新增用户(可能结构/上游问题): ${out.trim().slice(0, 200)}`
-        throw new Error(reason)
-      }
+      if (added >= 1) return true
+      // 已存在 = 幂等成功（不覆盖，也无需覆盖：email 对应的 UUID 由账本权威维护）
+      if (/already exists/i.test(out)) return false
+      throw new Error(`adu 未新增用户(可能结构/上游问题): ${out.trim().slice(0, 200)}`)
     } finally {
       fs.rmSync(file, { force: true })
     }
