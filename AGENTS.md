@@ -67,14 +67,15 @@ systemctl restart xray          # 只在改 deploy/xray.config.json 时需要
 
 真实值只存 `server/.env` / `frontend/.env`（均被 `.gitignore` 拦截），仓库只提交 `.env.example`。
 
-**server**：`PORT`(7897)、`HOST`(127.0.0.1)、`XRAY_API`(127.0.0.1:8081)、`XRAY_BIN`、`XRAY_INBOUND_TAG`(vless-in)、`XRAY_API_TIMEOUT_S`、`XRAY_API_RETRIES`、`DEFAULT_HOURS`(24)、`MAX_HOURS`(720)、`EXPIRE_SCAN_INTERVAL_S`(15)、`LEDGER_INTERVAL_S`(30)、`ACCESS_LOG_PATH`、`CONN_RETENTION_S`(7 天)、`SAMPLE_RETENTION_S`(30 天)、`REGION_PROBE_INTERVAL_S`(300)、`DB_PATH`、`AUTH_MODE`(builtin)、`V2LINK_ADMIN_USER`(admin)、`V2LINK_ADMIN_PASSWORD`、`SESSION_TTL_HOURS`(12)。
+**server**：`PORT`(7897)、`HOST`(127.0.0.1)、`XRAY_API`(127.0.0.1:8081)、`XRAY_BIN`、`XRAY_INBOUND_TAG`(vless-in)、`XRAY_API_TIMEOUT_S`、`XRAY_API_RETRIES`、`DEFAULT_HOURS`(24)、`MAX_HOURS`(720)、`EXPIRE_SCAN_INTERVAL_S`(15)、`LEDGER_INTERVAL_S`(30)、`XRAY_RECONCILE_INTERVAL_S`(60)、`ACCESS_LOG_PATH`、`CONN_RETENTION_S`(7 天)、`SAMPLE_RETENTION_S`(30 天)、`REGION_PROBE_INTERVAL_S`(300)、`DB_PATH`、`AUTH_MODE`(builtin)、`V2LINK_ADMIN_USER`(admin)、`V2LINK_ADMIN_PASSWORD`、`SESSION_TTL_HOURS`(12)。
 
 **frontend**（构建时注入）：`VITE_API_PROXY_TARGET`、`VITE_PUBLIC_HOST`、`VITE_PUBLIC_PATH`。
 
 ## 架构要点
 
 - **热管理**：加删用户走 xray 官方 `xray api adu/rmu`，**不 reload、不断存量连接**。`xrayClient.ts` 封装调用（超时 + 重试退避）。
-- **调度器**（`scheduler.ts`）：过期扫描（15s）、流量账本累计（30s）、连接/采样清理、地区探测（300s）。新增定时任务挂在这里，别在 `index.ts` 里裸起 `setInterval`。
+- **调度器**（`scheduler.ts`）：过期扫描（15s）、流量账本累计（30s）、连接/采样清理、地区探测（300s）、xray 一致性同步（`XRAY_RECONCILE_INTERVAL_S`，默认 60s）。新增定时任务挂在这里，别在 `index.ts` 里裸起 `setInterval`。
+- **xray 一致性同步**（`services/reconcile.ts`）：账本为权威、xray 为镜像。每轮把「应有效」的链接 `adu` 补回、把 revoked/expired 的 `rmu` 清掉，防 xray 重启后静默丢用户；**只读账本、不改账本**，xray 调用失败只记日志并下轮重试。`addUser` 幂等（已存在视为成功、返回 false），只有真正增删才打一行 `[reconcile]` 摘要（无动作不打日志）。`/api/healthz` 返回 `data.xray` 内存快照。
 - **连接追溯**：`accessLogTailer` 增量读 xray access log → `accessLogParse` 解析 → 写 `connections` 表（默认保留 7 天）。
 - **流量曲线**：每 30s 采样写 `traffic_samples`（保留 30 天），前端 `TrafficChart` 用轻量 SVG 渲染，`trafficChart.ts` 是纯函数（有单测）。
 - **鉴权（双模式，`AUTH_MODE`）**：`builtin`（默认）由控制面自带账号——`services/accountService.ts` 管 users/sessions（scrypt 口令、会话 12h 滑动续期），`routes/auth.ts` 暴露 `/api/auth-mode`（免鉴权）+ `/api/auth/login|logout|me`；中间件接受 cookie `v2link_session` 或 `Authorization: Bearer`，**忽略** `X-Auth-User`。`sso` 关掉自带口令，只认前置认证注入的 `X-Auth-User`，`auth/login|logout|me` 一律 404。两模式缺失凭证都返回 401（不 302、不 500）；审计 `actor` 取当前身份，缺省 `dev`（测试）。公开路径 `/`、`/v2ws`、`/api/auth-mode` 不需要鉴权。非法 `AUTH_MODE` 一律回落 `builtin`。
