@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Scheduler } from '../services/scheduler.js'
 import type { XrayClient } from '../services/xrayClient.js'
+import type { ReconcileService } from '../services/reconcile.js'
 import { createRegionProbeService, type RegionProbeService } from '../services/regionProbe.js'
 import { makeMonitor, makeRepo, makeTestDb } from './helpers.js'
 
@@ -43,6 +44,8 @@ function makeScheduler(overrides?: {
   connRetentionMs?: number
   sampleRetentionMs?: number
   regionProbe?: RegionProbeService
+  reconcile?: ReconcileService
+  xrayReconcileIntervalMs?: number
 }) {
   const db = makeTestDb()
   const repo = makeRepo(db)
@@ -53,6 +56,8 @@ function makeScheduler(overrides?: {
     monitor,
     xray: overrides?.xray ?? stubXray(),
     regionProbe: overrides?.regionProbe,
+    reconcile: overrides?.reconcile,
+    xrayReconcileIntervalMs: overrides?.xrayReconcileIntervalMs,
     logger: () => undefined,
     now: overrides?.now ?? (() => 1_800_000_000_000),
     expireIntervalMs: overrides?.expireIntervalMs ?? 15_000,
@@ -273,5 +278,34 @@ describe('地区连通性探测（地区连通性监控）', () => {
   it('未挂 regionProbe 时 runRegionProbes 为空操作', async () => {
     const { sched } = makeScheduler({})
     await expect(sched.runRegionProbes()).resolves.toBeUndefined()
+  })
+})
+
+describe('xray 一致性同步（需求文档 R2/R3）', () => {
+  it('未挂 reconcile → runReconcile 为空操作', async () => {
+    const { sched } = makeScheduler({})
+    await expect(sched.runReconcile()).resolves.toBeUndefined()
+  })
+
+  it('挂了 reconcile → 调其 run；run 抛错不致命（记日志，下轮重试）', async () => {
+    const run = vi.fn(async () => {
+      throw new Error('boom')
+    })
+    const { sched } = makeScheduler({ reconcile: { run } as unknown as ReconcileService })
+    await expect(sched.runReconcile()).resolves.toBeUndefined()
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+
+  it('start() 启动即跑一轮 reconcile（不 await），并按周期挂定时器', async () => {
+    const run = vi.fn(async () => undefined)
+    const { sched } = makeScheduler({
+      reconcile: { run } as unknown as ReconcileService,
+      xrayReconcileIntervalMs: 60_000,
+    })
+    await sched.start()
+    // start 内部 void runReconcile()，事件循环一轮后应已调用一次
+    await new Promise((r) => setImmediate(r))
+    expect(run).toHaveBeenCalled()
+    sched.stop()
   })
 })

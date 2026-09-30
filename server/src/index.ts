@@ -10,6 +10,7 @@ import { xrayClient } from './services/xrayClient.js'
 import { createLinkService } from './services/linkService.js'
 import { Scheduler } from './services/scheduler.js'
 import { createRegionProbeService } from './services/regionProbe.js'
+import { ReconcileService } from './services/reconcile.js'
 import { AccessLogTailer } from './lib/accessLogTailer.js'
 
 // 入口：config → DB schema → repo/service → scheduler → tailer → app/listen
@@ -32,6 +33,10 @@ const service = createLinkService({
 
 // 地区连通性监控（地区连通性监控）：端点来自配置（默认内置 / REGION_PROBES 覆盖）
 const regionProbe = createRegionProbeService({ probes: parseRegionProbes(config.regionProbes) })
+
+// xray 用户与账本一致性同步（需求文档）：账本为权威，xray 为镜像。
+// 启动时由 scheduler.start() 跑首轮（不阻塞 HTTP），之后按周期自愈。
+const reconcile = new ReconcileService({ repo, xray: xrayClient })
 
 // 认证模式：启动打印一行；builtin 下首次启动（users 为空）创建初始管理员并打印一次口令。
 const accounts = createAccountService(db, { sessionTtlMs: config.sessionTtlMs })
@@ -56,6 +61,8 @@ const scheduler = new Scheduler({
   xray: xrayClient,
   regionProbe,
   regionProbeIntervalMs: config.regionProbeIntervalMs,
+  reconcile,
+  xrayReconcileIntervalMs: config.xrayReconcileIntervalMs,
   expireIntervalMs: config.expireScanIntervalMs,
   ledgerIntervalMs: config.ledgerIntervalMs,
   connCleanupIntervalMs: config.connCleanupIntervalMs,
@@ -75,10 +82,16 @@ const tailer = new AccessLogTailer({
   sink: (rows) => monitor.insertConnections(rows),
 })
 
-const app = createApp(service, monitor, regionProbe, {
-  mode: config.authMode,
-  accounts,
-})
+const app = createApp(
+  service,
+  monitor,
+  regionProbe,
+  reconcile,
+  {
+    mode: config.authMode,
+    accounts,
+  },
+)
 const server = app.listen(config.port, config.host, () => {
   console.log(`v2link 控制面已启动: http://${config.host}:${config.port}`)
   console.log(
@@ -87,7 +100,7 @@ const server = app.listen(config.port, config.host, () => {
   console.log(
     `定时器: 过期扫描 ${config.expireScanIntervalMs}ms / 流量账本 ${config.ledgerIntervalMs}ms` +
       ` / 连接清理 ${config.connCleanupIntervalMs}ms / 采样清理 ${config.sampleCleanupIntervalMs}ms` +
-      ` / 地区探测 ${config.regionProbeIntervalMs}ms`,
+      ` / 地区探测 ${config.regionProbeIntervalMs}ms / xray 一致性同步 ${config.xrayReconcileIntervalMs}ms`,
   )
   console.log(`access log 采集: ${config.accessLogPath}（保留 ${config.connRetentionMs}ms 内）`)
   void scheduler.start()

@@ -26,6 +26,8 @@ export function toView(row: LinkRow): LinkView {
 
 export interface LinksRepo {
   list(): LinkView[]
+  /** 全量账本行（含 revoked/expired），reconcile 用；按 created_at 倒序 */
+  listAll(): LinkRow[]
   byId(id: string): LinkRow | undefined
   /** 返回新行（须在服务层事务内使用） */
   insert(row: LinkRow): void
@@ -75,6 +77,9 @@ function statements(db: Database): LinksRepo {
   return {
     list() {
       return stmtList.all().map((r) => toView(r as unknown as LinkRow))
+    },
+    listAll() {
+      return stmtList.all().map((r) => r as unknown as LinkRow)
     },
     byId(id) {
       const r = stmtById.get(id) as unknown as LinkRow | undefined

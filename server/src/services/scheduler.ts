@@ -3,6 +3,7 @@ import type { LinksRepo } from '../db/linksRepo.js'
 import type { MonitoringRepo } from '../db/monitoringRepo.js'
 import type { XrayClient } from './xrayClient.js'
 import type { RegionProbeService } from './regionProbe.js'
+import type { ReconcileService } from './reconcile.js'
 import { parseStatsQuery } from '../lib/xrayStats.js'
 
 // 后台调度器（REQUIREMENTS.md §3.2/§3.3 + 监控/B + 地区连通性监控）：
@@ -10,6 +11,8 @@ import { parseStatsQuery } from '../lib/xrayStats.js'
 //   · 流量账本：每 30s statsquery -reset → delta 累加进 SQLite（links.up_bytes/down_bytes），
 //     同时写 traffic_samples 明细（流量曲线的数据源，A 层）
 //   · 地区连通性探测：每 5min 一轮 runRegionProbes（结果存内存，见 regionProbe.ts）
+//   · xray 一致性同步：周期 reconcile（账本应有效 → adu；应失效 → rmu），防 xray 重启后静默丢用户
+//     （需求文档 R2/R3；启动即跑一轮，默认周期 60s，0 = 只启动跑一次）
 //   · 保留清理：connections 7 天滚动（每小时）；traffic_samples 30 天（每天）——防无限增长
 //
 // 首拉语义（REQUIREMENTS.md §3.2 关注点）：xray stats 是易失计数器，账本权威在 SQLite。
@@ -41,6 +44,10 @@ export interface SchedulerOptions {
   regionProbe?: RegionProbeService
   /** 地区探测周期（ms）。缺省 300000（5min）；0 = 挂上但不在定时器轮询 */
   regionProbeIntervalMs?: number
+  /** xray 用户与账本一致性同步服务（需求文档 R2/R3）。缺省 = 不挂同步。 */
+  reconcile?: ReconcileService | null
+  /** 一致性同步周期（ms）。缺省 60000；0 = 挂上但不在定时器轮询（启动仍同步一次，同地区探测惯例） */
+  xrayReconcileIntervalMs?: number
 }
 
 export class Scheduler {
@@ -63,6 +70,9 @@ export class Scheduler {
   private regionProbeTimer: ReturnType<typeof setTimeout> | null = null
   private readonly regionProbe: RegionProbeService | null
   private readonly regionProbeIntervalMs: number
+  private readonly reconcile: ReconcileService | null
+  private readonly xrayReconcileIntervalMs: number
+  private reconcileTimer: ReturnType<typeof setTimeout> | null = null
   private running = false
   /** 首次采集前置位：true = 未预热（见类头「首拉语义」注释） */
   private firstLedger = true
@@ -82,6 +92,8 @@ export class Scheduler {
     this.sampleRetentionMs = opts.sampleRetentionMs
     this.regionProbe = opts.regionProbe ?? null
     this.regionProbeIntervalMs = opts.regionProbeIntervalMs ?? 300_000
+    this.reconcile = opts.reconcile ?? null
+    this.xrayReconcileIntervalMs = opts.xrayReconcileIntervalMs ?? 60_000
   }
 
   async start(): Promise<void> {
@@ -114,6 +126,16 @@ export class Scheduler {
         )
       }
     }
+    // xray 一致性同步（需求文档 R2/R3）：启动即跑一轮自愈（xray 可能已重启丢用户），
+    // 不 await（不阻塞首拉/HTTP）；周期任务防「xray 单方面重启」的静默失效。
+    // 周期为 0 时仅启动同步一次（与地区探测同惯例）。
+    void this.runReconcile()
+    if (this.xrayReconcileIntervalMs > 0) {
+      this.reconcileTimer = setInterval(
+        () => void this.runReconcile(),
+        this.xrayReconcileIntervalMs,
+      )
+    }
   }
 
   stop(): void {
@@ -123,11 +145,13 @@ export class Scheduler {
     if (this.connCleanupTimer) clearInterval(this.connCleanupTimer)
     if (this.sampleCleanupTimer) clearInterval(this.sampleCleanupTimer)
     if (this.regionProbeTimer) clearInterval(this.regionProbeTimer)
+    if (this.reconcileTimer) clearInterval(this.reconcileTimer)
     this.expireTimer = null
     this.ledgerTimer = null
     this.connCleanupTimer = null
     this.sampleCleanupTimer = null
     this.regionProbeTimer = null
+    this.reconcileTimer = null
   }
 
   /** 过期扫描单轮（导出便于测试） */
@@ -207,6 +231,16 @@ export class Scheduler {
       await this.regionProbe.runRound()
     } catch (e) {
       this.log('地区连通性探测失败（下轮重试）', { err: (e as Error).message })
+    }
+  }
+
+  /** 一致性同步单轮（导出便于测试）。未挂服务时为空操作；失败不致命（记日志，下轮重试）。 */
+  async runReconcile(): Promise<void> {
+    if (!this.reconcile) return
+    try {
+      await this.reconcile.run()
+    } catch (e) {
+      this.log('xray 一致性同步失败（下轮重试）', { err: (e as Error).message })
     }
   }
 

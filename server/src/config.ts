@@ -31,6 +31,8 @@ const envSchema = z.object({
   MAX_HOURS: z.coerce.number().int().min(1).max(24 * 365).default(720),
   EXPIRE_SCAN_INTERVAL_S: z.coerce.number().int().min(3).max(3600).default(15),
   LEDGER_INTERVAL_S: z.coerce.number().int().min(5).max(3600).default(30),
+  // xray 用户与账本一致性同步周期（需求文档 R3；默认 60s，0 = 只做启动同步、不周期自愈）
+  XRAY_RECONCILE_INTERVAL_S: z.coerce.number().int().min(0).max(3600).default(60),
   ACCESS_LOG_PATH: z.string().trim().default('/var/log/xray/access.log'),
   CONN_CLEANUP_INTERVAL_S: z.coerce.number().int().min(60).max(3600 * 24).default(3600),
   CONN_RETENTION_S: z.coerce.number().int().min(3600).max(3600 * 24 * 30).default(3600 * 24 * 7),
@@ -81,6 +83,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxHours: p.MAX_HOURS,
     expireScanIntervalMs: p.EXPIRE_SCAN_INTERVAL_S * 1000,
     ledgerIntervalMs: p.LEDGER_INTERVAL_S * 1000,
+    xrayReconcileIntervalMs: p.XRAY_RECONCILE_INTERVAL_S * 1000,
     accessLogPath: p.ACCESS_LOG_PATH,
     connCleanupIntervalMs: p.CONN_CLEANUP_INTERVAL_S * 1000,
     connRetentionMs: p.CONN_RETENTION_S * 1000,
@@ -164,6 +167,8 @@ export interface Config {
   maxHours: number
   expireScanIntervalMs: number
   ledgerIntervalMs: number
+  /** xray 一致性同步周期（默认 60s；0 = 只做启动同步、不周期自愈，见 需求文档 R3） */
+  xrayReconcileIntervalMs: number
   /** xray access log 文件路径（log.access，logrotate copytruncate 管理） */
   accessLogPath: string
   /** connections 过期清理周期（默认 1h） */

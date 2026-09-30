@@ -34,6 +34,23 @@ describe('GET /api/healthz', () => {
     expect(res.body.data.uptime).toBeGreaterThanOrEqual(before)
     expect(res.body.data.uptime).toBeLessThanOrEqual(after)
   })
+
+  it('接入数据面时返回 xray reconcile 内存快照（R4，零往返）', async () => {
+    const app = express()
+    app.use(
+      '/api/healthz',
+      createHealthRouter({
+        snapshot: () => ({ activeLinks: 3, reconciledAt: 123, lastFix: { added: 1, removed: 2 } }),
+      }),
+    )
+    const res = await request(app).get('/api/healthz')
+    expect(res.status).toBe(200)
+    expect(res.body.data.xray).toEqual({
+      activeLinks: 3,
+      reconciledAt: 123,
+      lastFix: { added: 1, removed: 2 },
+    })
+  })
 })
 
 async function makeApp() {

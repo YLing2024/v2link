@@ -11,6 +11,7 @@ import { createRegionsRouter } from './routes/regions.js'
 import type { MonitoringRepo } from './db/monitoringRepo.js'
 import type { LinkService } from './services/linkService.js'
 import type { RegionProbeService } from './services/regionProbe.js'
+import type { ReconcileService } from './services/reconcile.js'
 
 // Express app 组装：JSON 解析 → /api/healthz（无鉴权）→ /api 认证入口（auth-mode 免鉴权；
 // builtin 走自带账号会话 / sso 只读前置认证注入的 X-Auth-User，见 middleware/auth.ts）。
@@ -35,6 +36,7 @@ export function createApp(
   service: LinkService,
   monitor: MonitoringRepo,
   probe?: RegionProbeService,
+  reconcile?: ReconcileService,
   auth: AuthDeps = defaultAuthDeps(),
 ): Express {
   const app = express()
@@ -43,8 +45,8 @@ export function createApp(
   app.set('trust proxy', config.trustProxy)
   app.use(express.json({ limit: '64kb' }))
 
-  // 健康检查放最前（无鉴权）
-  app.use('/api/healthz', createHealthRouter())
+  // 健康检查放最前（无鉴权）；带上数据面 reconcile 内存快照（R4）
+  app.use('/api/healthz', createHealthRouter(reconcile))
 
   // 认证入口（auth-mode 免鉴权；login/logout/me 见 routes/auth.ts）——必须在鉴权中间件之前
   app.use('/api', createAuthRouter(auth))
