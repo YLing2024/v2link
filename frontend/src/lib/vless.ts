@@ -11,6 +11,11 @@ export function publicPath(): string {
   return (import.meta.env.VITE_PUBLIC_PATH as string | undefined)?.trim() || '/v2ws'
 }
 
+/** TLS SNI + WS Host（域名）。地址用 IP 时，证书与 Host 头仍需域名，故独立于 publicHost() */
+export function publicSni(): string {
+  return (import.meta.env.VITE_PUBLIC_SNI as string | undefined)?.trim() || ''
+}
+
 /** 别名回退链：alias（客户端名）→ note（备注）→ id；保证导入后节点有可辨识名字
  *  逐级 trim 后判定非空（纯空白视为未设置，继续回退） */
 export function displayAlias(link: { alias?: string; note?: string; id?: string }): string {
@@ -26,15 +31,22 @@ export function vlessLink(
   host: string = publicHost(),
   path: string = publicPath(),
   alias?: string,
+  sni: string = publicSni(),
 ): string {
   const wsPath = path.startsWith('/') ? path : `/${path}`
-  const qs = new URLSearchParams({
+  // 地址（host）与 WS Host/SNI（wsHost）分离：地址可用 IP 绕开前置高防，
+  // 但 TLS 证书与 WS 的 Host 头仍是域名。
+  const wsHost = (sni || host).trim()
+  const params: Record<string, string> = {
     encryption: 'none',
     type: 'ws',
     security: 'tls',
     path: wsPath,
-    host,
-  }).toString()
+    host: wsHost,
+  }
+  // 仅在地址与域名不一致（地址是 IP）时输出 sni，保持域名型链接格式不变
+  if (wsHost !== host) params.sni = wsHost
+  const qs = new URLSearchParams(params).toString()
   const uri = `vless://${uuid}@${host}:443?${qs}`
   const name = alias?.trim()
   return name ? `${uri}#${encodeURIComponent(name)}` : uri

@@ -9,7 +9,10 @@ import type { LinkRow } from '../types.js'
 //   vless://<uuid>@<host>:443?encryption=none&security=tls&type=ws&path=%2Fv2ws&host=<host>#<别名>
 
 export interface VlessLinkParams {
+  /** 服务器地址（IP 或域名）——填 IP 可绕开前置高防 */
   host: string
+  /** TLS SNI 与 WS Host（域名）。缺省时退回 host；地址为 IP 时必须给域名 */
+  sni?: string
   port?: number
   path: string
   security?: 'tls' | 'reality' | 'none'
@@ -29,8 +32,11 @@ export function buildVlessUri(p: VlessLinkParams): string {
   // 注意：不要预先 encodeURIComponent(path) —— URLSearchParams 会统一做 form-urlencoded
   // 编码（把 / → %2F、% → %25 一次完成），结果即客户端期望的 path=%2Fv2ws。
   params.path = wsPath
-  // host 参数必须与 SNI/WS Host 一致（不带端口）
-  params.host = p.host
+  // host 参数必须与 SNI/WS Host 一致（不带端口）；地址（p.host）可以是 IP（绕开前置高防），
+  // 此时 SNI/WS Host 仍取域名（来自 p.sni），并额外输出 sni= 参数。
+  const wsHost = (p.sni?.trim() || p.host).trim()
+  params.host = wsHost
+  if (wsHost !== p.host) params.sni = wsHost
   const port = p.port ?? 443
   const qs = new URLSearchParams(params).toString()
   const uri = `vless://${p.uuid}@${p.host}:${port}?${qs}`
@@ -40,6 +46,11 @@ export function buildVlessUri(p: VlessLinkParams): string {
 
 export function publicHost(): string {
   return process.env.PUBLIC_HOST ?? 'v2.example.com'
+}
+
+/** TLS SNI + WS Host（域名）；与 publicHost()（可能是 IP）分离 */
+export function publicSni(): string {
+  return process.env.PUBLIC_SNI ?? ''
 }
 
 export function publicPath(): string {
@@ -60,8 +71,9 @@ export function linkToVlessUri(
   row: Pick<LinkRow, 'uuid'> & { alias?: string; note?: string; id?: string },
   host = publicHost(),
   path = publicPath(),
+  sni = publicSni(),
 ): string {
-  return buildVlessUri({ host, path, uuid: row.uuid, alias: displayAlias(row) })
+  return buildVlessUri({ host, sni, path, uuid: row.uuid, alias: displayAlias(row) })
 }
 
 // 构建 adu 所需的 xray inbound 配置片段。
