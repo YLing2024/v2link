@@ -1,155 +1,150 @@
 # v2link
 
-临时 VLESS 链接生成与分发管理系统——快速生成一条带有效期的 `vless://` 链接，扫码/复制即可用，全程在你的管理后台掌控之中。
+临时 VLESS 链接的生成与分发：签发一条带有效期的 `vless://` 链接，扫码或复制即可用，到期自动失效。
 
 ## 它能做什么
 
-- **一键生成临时链接**：指定时长（1 小时 ~ 30 天），生成 `vless://` 链接 + 二维码
-- **全客户端兼容**：v2rayN / Shadowrocket / Clash / sing-box 等主流客户端开箱即用
-- **生命周期管理**：到期自动失效；随时吊销、延长（支持小时相对延长 / 自定义绝对到期时刻）
-- **精确流量账本**：每链接上下行流量独立统计（SQLite 持久化，重启不丢）
-- **默认自带账号密码**，开箱即用；也可以关掉自带口令（`AUTH_MODE=sso`）
-- **数据面热管理**：基于 xray 官方管理 API，加删用户**无需重启、不断存量连接**
-- **底部全球连通性监控**：服务器每 5 分钟直连美国/欧洲/日本/新加坡等主流地区 HTTPS 端点测延迟，底部固定状态条实时展示
-- **历史流量曲线**：每 30s 采样一次，Dashboard 单链接查看近 24h / 7d / 30d 用量趋势（轻量 SVG）
-- **连接记录追溯**：消费 xray access log，追溯“谁、何时、连过哪个目标”；保留 7 天
-- **操作审计**：后台生成 / 吊销 / 延长全部留痕（操作人 = 当前登录身份，缺省 `dev`）
+- 生成 `vless://` 链接与二维码。有效期以绝对到期时刻为主输入（前端 `datetime-local`，默认 now+24h），另有 1h / 6h / 24h / 3d / 7d 快捷档；也可设为永久有效。
+- 生命周期：到期由调度器自动吊销；可手动吊销；可编辑到期时刻（延长或提前），限时与永久可互转。
+- 流量账本：每链接上下行字节独立累计，SQLite 持久化，重启不丢；每 30s 从 xray 统计接口拉取增量。
+- 流量曲线：每 30s 采样写入 `traffic_samples`，保留近 30 天，前端按小时 / 天分桶渲染 SVG 折线。
+- 连接追溯：解析 xray access log 的连接建立事件，记录「何时连过哪个目标」，保留 7 天。
+- 操作审计：生成 / 吊销 / 延长 / 转永久均留痕，操作人取当前登录身份，缺省 `dev`。
+- 地区连通性：每 5 分钟直连美国 / 欧洲 / 日本 / 新加坡的 HTTPS 端点测 RTT，底部状态条按延迟着色。
+- 数据面热管理：经 `xray api` 子命令（adu / rmu / statsquery）增删用户与读取计数，不 reload、不断存量连接。
+- 兼容 v2rayN、Shadowrocket、Clash、sing-box 等标准 `vless://` + WebSocket 客户端。
 
 ## 架构
 
-```
-客户端 (v2rayN/Shadowrocket/Clash/sing-box)
-   │  vless://<uuid>@<your-domain>:443?security=tls&type=ws&path=/v2ws
-   ▼
-nginx :443  (TLS 终结)
-   ├── /v2ws   → xray (VLESS+WS inbound, 出口 freedom 直连)
-   ├── /api/*  → 控制面 (Express + SQLite，认证模式见下)
-   └── /       → 前端静态(控制面托管 build 产物)
+```text
+客户端 ── vless://<uuid>@<host>:443?encryption=none&security=tls&type=ws&path=/v2ws ──▶ nginx（TLS 终结）
+   ├── /v2ws  → xray  127.0.0.1:7895（VLESS + WS inbound，出口 freedom 直连）
+   ├── /api/  → 控制面 127.0.0.1:7897（builtin）或 Auth Gateway（sso，见「认证与安全」）
+   └── /      → 前端静态（控制面用 express.static 托管 frontend/dist）
 
-控制面(Node/TS): SQLite(权威账本) ⇄ xray api CLI (adu/rmu/statsquery 热管理)
-   └── 定时器: 过期扫描 15s / 流量账本+采样 30s / 连接清理 1h / 采样清理 1d / 地区探测 5min
-   └── access log 采集器: /var/log/xray/access.log → connections（2s 轮询 + logrotate 自愈）
+控制面（Node/TS）: SQLite 权威账本 ⇄ xray api（adu / rmu / statsquery）
+  定时器: 过期扫描 15s / 流量账本与采样 30s / 连接清理 1h / 采样清理 1d / 地区探测 5min
+  access log 采集: ACCESS_LOG_PATH → connections（2s 轮询，处理 copytruncate 与文件重建）
 ```
 
-**数据面**：xray-core（VLESS+WS），多用户由一个 inbound 承载，每个用户 = 一个 UUID/email。
-**控制面**：Node/TS + Express + better-sqlite3，通过 `xray api` 子命令（非 gRPC、非 reload）动态加删用户与采集流量。
-**账本**：控制面 SQLite 为权威——每 30s 拉取 xray 计数并累计，重启不丢；首拉语义已处理（不重复计停机窗口流量）。
+- 数据面：xray-core，一个 VLESS + WS inbound 承载多用户，每个用户一个 UUID，email 作为账本主键。
+- 控制面：Node/TS + Express + better-sqlite3，经 `xray api` 子命令动态管理用户，零 gRPC、零 reload。
+- 一致性：写操作先落 SQLite，再调 xray；xray 失败则回滚 SQLite 并返回 502（create / revoke）。
+- 账本：每 30s 拉取 xray 计数器增量并累计；进程启动后首拉只读不 reset，避免漏计停机窗口流量。
 
-### 监控 / 追溯 / 审计（数据流）
+## 监控 / 追溯 / 审计
 
 | 层 | 数据源 | 落库 | 保留 | 前端 |
 |---|---|---|---|---|
-| A 流量曲线 | scheduler 30s statsquery delta | `traffic_samples`（link_id/ts/delta） | 30 天滚动（每日清理） | 链接「详情 → 流量趋势」（SVG 折线） |
-| B 连接追溯 | xray access log（accepted 事件） | `connections`（email/link_id/ts/host/port） | 7 天滚动（每小时清理） | 链接「详情 → 连接记录」（表格 + 域名搜索） |
-| C 操作审计 | linkService create/revoke/extend | `audit_log`（actor/action/link_id/detail） | 不裁剪（管理类数据量小） | 顶部「审计」（分页列表） |
+| A 流量曲线 | 30s statsquery 增量 | `traffic_samples` | 30 天滚动 | 链接详情 → 流量趋势 |
+| B 连接追溯 | xray access log（仅连接建立事件） | `connections` | 7 天滚动 | 链接详情 → 连接记录 |
+| C 操作审计 | linkService 写操作 | `audit_log` | 不裁剪 | 顶部「审计」 |
 
-关键语义（均为实测结论，xray 26.3.27）：
-- xray access log 是**纯文本**、每连接一行、**只含连接建立（accepted）事件，无字节数**。故 `connections` 无 up/down/duration（恒 NULL）；“用了多少流量”走 `traffic_samples`（stats 聚合）。两者经 link_id/email 关联。
-- access log 含 `email:` 字段，可直连 links（email=id）；库中无匹配（残留/已吊销）时 `link_id=NULL` 仅记 email，仍可追溯。
-- 日志轮转由系统 **logrotate** 负责（保留 7 天，`deploy/xray-logrotate`）；控制面 tailer 按 file offset 增量读，处理 copytruncate（size 变小 → 归零重读）与 rename+新建（inode 变化 → 重开并按指纹去重），文件缺失自愈。
+xray access log 是纯文本，每连接一行，只有连接建立事件、没有字节数：`connections` 的 up/down/duration 恒为空，流量以 `traffic_samples` 为准。日志含 `email` 字段可关联 links，库中无匹配时 `link_id` 为空、仅记 email。轮转由系统 logrotate 负责（`deploy/xray-logrotate`，保留 7 天）。
 
 ## 快速开始
 
-### 依赖
-
-- Node.js ≥ 20
-- [xray-core](https://github.com/XTLS/Xray-core) ≥ 26.3（含 `xray api` 子命令；`xray version` 验证）
-
-### 1. 数据面：xray
+依赖：Node.js ≥ 20、xray-core（含 `xray api` 子命令）。
 
 ```bash
-# xray 配置见 deploy/xray.config.json（监听 127.0.0.1:7895 + 管理 API 127.0.0.1:8081 + access log）
-# 用 systemd 或你习惯的方式常驻：
-mkdir -p /var/log/xray          # access/error log 目录（xray 以 root 跑）
+# 1. 数据面：xray（见 deploy/xray.config.json，监听 127.0.0.1:7895，管理 API 127.0.0.1:8081）
+mkdir -p /var/log/xray
 xray run -c deploy/xray.config.json
-# access log 轮转（保留 7 天，与控制面 connections 保留期对齐）：
-cp deploy/xray-logrotate /etc/logrotate.d/xray-access
-```
-
-### 2. 控制面
-
-```bash
-cd server
-cp .env.example .env    # 按需修改（端口、xray 地址、认证模式、ACCESS_LOG_PATH/保留期）
+cp deploy/xray-logrotate /etc/logrotate.d/xray-access   # access log 轮转（保留 7 天）
+# 2. 控制面 + 前端（根目录 npm workspaces）
 npm install
-npm run build && npm start
+cp server/.env.example server/.env       # 端口、xray 地址、认证模式等
+npm run build                            # server tsc + frontend vite build
+npm start                                # node server/dist/index.js，监听 127.0.0.1:7897
 ```
 
-### 3. 前端
+前端构建产物在 `frontend/dist`，由控制面托管，无需单独部署。
 
-```bash
-cd frontend
-cp .env.example .env
-npm install && npm run build   # 产物由控制面自动托管（server/../frontend/dist）
-```
+## 配置
 
-### 4. nginx
+`server/.env`（模板与注释见 `server/.env.example`）：
 
-复制 `deploy/v2link.conf.example` 为你的站点配置，替换 `<YOUR_DOMAIN>` / `<AUTH_SERVER_PORT>` 后 `nginx -t && systemctl reload nginx`。
+| 名称 | 默认值 | 说明 |
+|---|---|---|
+| `PORT` | `7897` | 控制面监听端口 |
+| `HOST` | `127.0.0.1` | 监听地址，生产由 nginx 反代 |
+| `XRAY_API` | `127.0.0.1:8081` | xray 管理 API 地址 |
+| `XRAY_BIN` | `xray` | xray 可执行文件 |
+| `XRAY_INBOUND_TAG` | `vless-in` | 受管 inbound 的 tag |
+| `XRAY_API_TIMEOUT_S` | `3` | 单次 xray api 调用超时（秒） |
+| `XRAY_API_RETRIES` | `2` | 调用失败重试次数（指数退避） |
+| `DEFAULT_HOURS` | `24` | 未指定有效期时的默认时长（小时） |
+| `MAX_HOURS` | `720` | `hours` 档上限（小时） |
+| `EXPIRE_SCAN_INTERVAL_S` | `15` | 过期扫描周期（秒） |
+| `LEDGER_INTERVAL_S` | `30` | 流量账本与采样周期（秒） |
+| `ACCESS_LOG_PATH` | `/var/log/xray/access.log` | xray access log 路径 |
+| `CONN_RETENTION_S` | `604800` | `connections` 保留秒数（7 天），清理周期 `CONN_CLEANUP_INTERVAL_S=3600` |
+| `SAMPLE_RETENTION_S` | `2592000` | `traffic_samples` 保留秒数（30 天），清理周期 `SAMPLE_CLEANUP_INTERVAL_S=86400` |
+| `REGION_PROBE_INTERVAL_S` | `300` | 地区探测周期（秒，最小 60） |
+| `REGION_PROBES` | 空 | 地区端点 JSON 覆盖；留空用内置美国 / 欧洲 / 日本 / 新加坡 |
+| `DB_PATH` | `server/data/v2link.db` | SQLite 文件路径（`data/` 已 gitignore） |
+| `AUTH_MODE` | `builtin` | `builtin` 自带账号 / `sso` 只认 `X-Auth-User` |
+| `V2LINK_ADMIN_USER` | `admin` | 首次启动创建的管理员用户名 |
+| `V2LINK_ADMIN_PASSWORD` | 空 | 留空则首次启动随机生成并只打印一次 |
+| `SESSION_TTL_HOURS` | `12` | 会话有效期（小时，命中滑动续期） |
+| `TRUST_PROXY` | `loopback` | Express trust proxy，反代下用于登录限速取真实 IP |
+
+`frontend/.env`（构建时注入，模板见 `frontend/.env.example`）：
+
+| 名称 | 默认值 | 说明 |
+|---|---|---|
+| `VITE_API_PROXY_TARGET` | `http://127.0.0.1:7897` | dev server 的 `/api` 代理目标 |
+| `VITE_PUBLIC_HOST` | `v2.example.com` | 生成链接的主机名（WS Host / SNI） |
+| `VITE_PUBLIC_PATH` | `/v2ws` | 生成链接的 WebSocket 路径 |
 
 ## API
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/links` | 全部链接 + 状态 + 上下行流量 |
-| POST | `/api/links` | 生成 `{ note?, alias?, expiresAt?, hours?, permanent? }`（三者互斥：绝对过期时刻 / 相对小时便捷档 / 永久，写审计） |
-| POST | `/api/links/:id/revoke` | 吊销（立即从 xray 摘除，写审计） |
-| POST | `/api/links/:id/extend` | 三选一：`{ hours }` 相对 / `{ expiresAt }` 绝对（epoch ms）/ `{ permanent: true }` 转永久（写审计） |
-| GET | `/api/regions/probes` | 地区连通性快照 + 最近 12 轮历史（需求 2，内存态） |
-| GET | `/api/links/:id/traffic?from=&to=&bucket=hour\|day` | 流量曲线桶（A；默认近 24h hour 桶） |
-| GET | `/api/links/:id/connections?q=&from=&to=&limit=&offset=` | 连接记录分页（B；q=域名前缀搜索） |
-| GET | `/api/audit?limit=&offset=` | 操作审计分页（C） |
+| POST | `/api/links` | 生成链接，body `{ note?, alias?, expiresAt?, hours?, permanent? }`（后三者互斥） |
+| POST | `/api/links/:id/revoke` | 吊销（从 xray 摘除用户，写审计） |
+| POST | `/api/links/:id/extend` | 三选一 `{ hours }` / `{ expiresAt }`（epoch ms）/ `{ permanent: true }` |
+| GET | `/api/links/:id/traffic?from=&to=&bucket=hour\|day` | 流量曲线分桶（默认近 24h、hour 桶） |
+| GET | `/api/links/:id/connections?q=&from=&to=&limit=&offset=` | 连接记录分页（`q` 为 host 前缀搜索） |
+| GET | `/api/audit?limit=&offset=` | 操作审计分页 |
+| GET | `/api/regions/probes` | 地区连通性快照 + 最近 12 轮历史（内存态） |
 | GET | `/api/healthz` | 健康检查（无鉴权） |
 | GET | `/api/auth-mode` | 当前认证模式（无鉴权） |
+| POST | `/api/auth/login` | builtin：校验口令、下发会话 cookie（按 IP 限速） |
+| POST | `/api/auth/logout` | builtin：删除会话（幂等） |
+| GET | `/api/auth/me` | builtin：返回当前用户名，未登录 401 |
 
-鉴权模式（`AUTH_MODE`）：
+`expiresAt` 须为 epoch 毫秒整数，晚于当前时刻且不超过未来 365 天；`extend` 的 `{ expiresAt }` 允许提前缩短有效期，永久链接没有基准时刻，转限时只能用 `expiresAt`。
 
-| 模式 | 说明 |
-|---|---|
-| `builtin`（默认） | 自带账号密码，开箱即用 |
-| `sso` | 关掉自带口令，身份由 `X-Auth-User` 决定——自家项目接 SSO 时走这一档 |
+## 认证与安全
 
-关掉后的登录跳转与 401 由你前面的认证层决定，本服务不再展开。公开路径 `/`、`/v2ws` 不需要任何鉴权。
+- `builtin`（默认）：控制面自带账号。口令以 `node:crypto` scrypt 哈希入库（`scrypt$<salt>$<hash>`，只存哈希）；登录成功下发 HttpOnly cookie `v2link_session`，请求也接受 `Authorization: Bearer <token>`；会话默认 12 小时并滑动续期；同一 IP 15 分钟内失败 10 次后返回 429（内存计数，重启清零）。
+- `sso`：关闭自带口令，身份只认前置认证注入的 `X-Auth-User`；`/api/auth/login|logout|me` 一律 404。两种模式下凭证缺失均返回 401，不 302、不 500。
+- 首次启动（users 表为空）按 `V2LINK_ADMIN_USER` 创建管理员；未提供口令时随机生成并只打印一次。
+- 免鉴权路径：`/`、`/v2ws`、`/api/healthz`、`/api/auth-mode`。
+- 私有信息零硬编码：域名经 `VITE_*` 构建注入与 nginx 配置，口令只存 `.env`（已 gitignore）。日志与审计不额外输出完整 `vless://` 链接。
 
-> `extend` 的 `expiresAt`：epoch 毫秒整数；须晚于当前时间、且不早于当前时刻起 365 天（显式绝对时刻不设小时上限，允许提前缩短有效期）。`hours` 沿用 1~720 上限，在当前到期时刻基础上向后平移。
+## 部署
 
-> `permanent`（用户 2026-09-14 需求）：永久有效，永不过期，只能手动吊销。数据层用 `expires_at = 0` 作哨兵（单点定义见 `server/src/lib/expiry.ts`），过期扫描（每 15s）显式跳过；响应里 `permanent: boolean` 由 `expires_at` 推导，前端展示优先用它。生成时与 `hours` / `expiresAt` 互斥（同传 400）。
->
-> **过期时刻为准**（同日反馈）：生成与编辑都以**绝对过期时刻（分钟精度）**为主输入 —— `POST /api/links` 的 `expiresAt`（边界校验：晚于当前、≤ 未来 365 天，与 `hours`/`permanent` 互斥）；前端「生成链接」弹窗主输入是 `datetime-local`（默认预填 now+24h），`1 小时 / 6 小时 / 24 小时 / 3 天 / 7 天` 只是「一键把时刻设到此刻 + N」的快捷键，剩余时长以「距现在约 X」提示在旁边显示。列表「过期时间」列显示绝对时刻 + 派生小字 `剩 3 小时 20 分` / `已过期 2 小时` / `永久`；操作列的「延长」已改名为「编辑」（弹窗标题「编辑过期时间」，预填当前到期时刻，可直接换成别的时刻）。
->
-> `hours` 仍保留为 API 便捷档（= 创建时刻 + N 小时，上限 `MAX_HOURS`），前端不再用它。
->
-> **双向转换**（同日晚追加）：`extend` 支持三选一 —— `{ hours }` 相对、`{ expiresAt }` 绝对、`{ permanent: true }` 转永久。限时 ↔ 永久 可互转：永久 → 限时用 `{ expiresAt }`（永久链接没有基准时刻，传 `{ hours }` 返回 400）；已是永久再传 `{ permanent: true }` 返回 400。转换同样写审计：转永久记 `{ permanent: true }`，永久转限时记 `{ from: 'permanent', expiresAt, expires_at }`。
->
-> `alias`（别名，用户 2026-09-14 需求）：客户端显示的节点名，写入 `vless://…` 的 `#fragment`（RFC 3986 百分号编码，中文/空格/特殊字符安全；v2rayN/NG、Shadowrocket、sing-box 导入时均会 UrlDecode）。生成时可填，限长 100，首尾空白裁剪。留空则回退链 **别名 → 备注 → 链接 ID**，保证导入客户端后节点一定有可辨识名字。响应 `LinkView.alias` 返回原值；列表在备注下方显示「别名：…」，复制/二维码弹窗底部显示最终节点名。
-
-## 地区连通性监控（需求 2）
-
-- **探测**：服务器直连（无代理）各主流地区知名 HTTPS 端点测 RTT（HTTP 探测非 ICMP）。默认 4 地：🇺🇸 美国 `gstatic.com/generate_204`、🇪🇺 欧洲 `bbc.com`、🇯🇵 日本 `yahoo.co.jp`、🇸🇬 新加坡 `cloudflare.com`；`.env` 的 `REGION_PROBES`（JSON）可整体覆盖，`REGION_PROBE_INTERVAL_S` 改周期（默认 300s）。
-- **数据流**：scheduler 每 5 分钟跑一轮，结果**只存内存**（最新快照 + 最近 12 轮历史，不落库）；启动即跑首轮。前端经 `GET /api/regions/probes` 拉取，底部固定状态条按延迟着色：绿 <300ms / 黄 300~800ms / 红 不可达。
-- **语义**：单次探测 5s 超时；拿到响应头即记 RTT（HEAD/提前断流，不下载 body）。失败地区仅标红，不影响其余地区与控制面。
-- **范围外**：不做历史图表（只快照 + 最近几轮）、不做 ICMP ping、不做代理链路测速。
-
-## 配置（server/.env）
-
-见 `server/.env.example`（含每项注释）。监控相关关键项：`ACCESS_LOG_PATH`（默认 `/var/log/xray/access.log`）、`CONN_RETENTION_S`（连接记录保留秒数，默认 7 天）、`SAMPLE_RETENTION_S`（采样保留秒数，默认 30 天）、`CONN_CLEANUP_INTERVAL_S` / `SAMPLE_CLEANUP_INTERVAL_S`（清理周期）、`REGION_PROBE_INTERVAL_S`（地区探测周期）与 `REGION_PROBES`（地区端点覆盖）。
-
-### 磁盘与性能预算（小服务器）
-
-- `traffic_samples`：1 链接 × 2880 行/天，30 天 ≈ 8.6 万行——SQLite 无压力
-- `connections`：保留 7 天；高峰期每分钟数千行 → 攒批 100 行/事务插入，查询全走 `(link_id, ts)` 索引；按天 logrotate 压缩控制磁盘
-- `audit_log`：管理操作频率极低，不裁剪
-- 列表接口全部分页；曲线聚合在内存做（30 天采样量级很小）
+- 构建：`npm run build`，产物为 `server/dist`（控制面）与 `frontend/dist`（前端静态）。
+- systemd：控制面 `v2link.service`、数据面 `xray.service`（单元文件不在本仓库）。改控制面后 `systemctl restart v2link`；仅改 `deploy/xray.config.json` 时才需 `systemctl restart xray`。
+- nginx：以 `deploy/v2link.conf.example` 为模板（示例为 sso 部署，`/api/` 与 `/_auth/` 转 Auth Gateway；用 `builtin` 时把 `/api/` 直连控制面）。`/v2ws` 转 xray，`/` 转控制面静态，`server_name` 用占位符替换；配置中不再有 `auth_request` / `/auth-check`。
+- 数据面：`deploy/xray.config.json` 提供 access / error log 与 `api.listen`；日志轮转见 `deploy/xray-logrotate`。
 
 ## 开发
 
 ```bash
-npm install          # 根目录 workspaces
-npm run dev -w server     # tsx watch
-npm run dev -w frontend   # vite
-npm test            # vitest 单测（server+frontend）
+npm install
+npm run dev            # concurrently: server（tsx watch）+ frontend（vite）
+npm test               # vitest（server + frontend）
+npm run typecheck
+npm run build
+npm run lint           # / npm run format
 ```
 
-## License
+单独跑某个包：`npm run dev -w server`、`npm run dev -w frontend`。
 
-MIT © v2link contributors
+## 许可证
+
+MIT，见 `LICENSE`。
