@@ -1,3 +1,5 @@
+[简体中文](README.md) ｜ [English](README.en.md)
+
 # v2link
 
 临时 VLESS 链接的生成与分发：签发一条带有效期的 `vless://` 链接，扫码或复制即可用，到期自动失效。
@@ -23,7 +25,7 @@
    └── /      → 前端静态（控制面用 express.static 托管 frontend/dist）
 
 控制面（Node/TS）: SQLite 权威账本 ⇄ xray api（adu / rmu / statsquery）
-  定时器: 过期扫描 15s / 流量账本与采样 30s / 连接清理 1h / 采样清理 1d / 地区探测 5min
+  定时器: 过期扫描 15s / 流量账本与采样 30s / xray 一致性同步 60s / 连接清理 1h / 采样清理 1d / 地区探测 5min
   access log 采集: ACCESS_LOG_PATH → connections（2s 轮询，处理 copytruncate 与文件重建）
 ```
 
@@ -77,6 +79,7 @@ npm start                                # node server/dist/index.js，监听 12
 | `MAX_HOURS` | `720` | `hours` 档上限（小时） |
 | `EXPIRE_SCAN_INTERVAL_S` | `15` | 过期扫描周期（秒） |
 | `LEDGER_INTERVAL_S` | `30` | 流量账本与采样周期（秒） |
+| `XRAY_RECONCILE_INTERVAL_S` | `60` | xray 用户与账本一致性同步周期（秒）；`0` 表示只在启动时同步一次、不做周期自愈 |
 | `ACCESS_LOG_PATH` | `/var/log/xray/access.log` | xray access log 路径 |
 | `CONN_RETENTION_S` | `604800` | `connections` 保留秒数（7 天），清理周期 `CONN_CLEANUP_INTERVAL_S=3600` |
 | `SAMPLE_RETENTION_S` | `2592000` | `traffic_samples` 保留秒数（30 天），清理周期 `SAMPLE_CLEANUP_INTERVAL_S=86400` |
@@ -94,7 +97,8 @@ npm start                                # node server/dist/index.js，监听 12
 | 名称 | 默认值 | 说明 |
 |---|---|---|
 | `VITE_API_PROXY_TARGET` | `http://127.0.0.1:7897` | dev server 的 `/api` 代理目标 |
-| `VITE_PUBLIC_HOST` | `v2.example.com` | 生成链接的主机名（WS Host / SNI） |
+| `VITE_PUBLIC_HOST` | `v2.example.com` | 生成链接的主机名（地址，可为 IP） |
+| `VITE_PUBLIC_SNI` | 空（回退 `VITE_PUBLIC_HOST`） | 生成链接的 TLS SNI / WS Host（域名）；地址用 IP 时单独填写 |
 | `VITE_PUBLIC_PATH` | `/v2ws` | 生成链接的 WebSocket 路径 |
 
 ## API
