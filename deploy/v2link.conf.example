@@ -38,7 +38,7 @@ server {
     # 红线：① 不得经过认证网关（Clash 抓取不带 cookie，会被拦成 302）
     #       ② 必须窄匹配：POST /api/clash/subscriptions 走网关正常鉴权，
     #          宽前缀会把 POST 也吞进来 → nginx 补斜杠 301 → 浏览器降级成 GET → 401 未登录
-    location ~ ^/api/clash/subscriptions/[A-Za-z0-9_-]{16,}$ {
+    location ~ "^/api/clash/subscriptions/[A-Za-z0-9_-]{16,}$" {
         proxy_pass http://127.0.0.1:7897;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
