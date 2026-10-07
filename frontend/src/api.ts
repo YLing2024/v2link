@@ -5,6 +5,7 @@
 
 import type {
   AuditRecord,
+  ClashSubResult,
   ConnectionRecord,
   Link,
   Paged,
@@ -204,4 +205,12 @@ export function auditLog(opts: { limit?: number; offset?: number } = {}): Promis
   if (opts.limit !== undefined) qs.set('limit', String(opts.limit))
   if (opts.offset !== undefined) qs.set('offset', String(opts.offset))
   return request<Paged<AuditRecord>>(`/api/audit?${qs}`)
+}
+
+/** 生成 Clash 订阅（多选节点 → 10 分钟有效订阅地址）。linkIds 顺序 = 勾选顺序 */
+export function createClashSubscription(linkIds: string[]): Promise<ClashSubResult> {
+  return request<ClashSubResult>('/api/clash/subscriptions', {
+    method: 'POST',
+    body: { linkIds },
+  })
 }

@@ -239,6 +239,22 @@ button {
   color: var(--danger);
 }
 
+/* ---------- 工具栏（多选 / 批量操作） ---------- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.toolbar .sel-count {
+  margin-right: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
 /* ---------- 表格 ---------- */
 .table-wrap {
   border: 1px solid var(--border);
@@ -293,6 +309,17 @@ button {
 
 .table .ops {
   text-align: right;
+}
+
+.table .sel-col {
+  width: 34px;
+  padding-right: 0;
+  text-align: center;
+}
+
+.table .sel-col input[type='checkbox'] {
+  cursor: pointer;
+  accent-color: var(--accent);
 }
 
 .note-cell {

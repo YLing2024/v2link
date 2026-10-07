@@ -10,6 +10,7 @@ const ACTION_LABEL: Record<AuditRecord['action'], string> = {
   create: '生成',
   revoke: '吊销',
   extend: '延长',
+  clash_sub_create: 'Clash 订阅',
 }
 
 export function AuditModal({ onClose }: { onClose: () => void }) {
@@ -105,6 +106,11 @@ function formatDetail(r: AuditRecord): string {
   if (!r.detail) return ''
   const d = r.detail
   const parts: string[] = []
+  if (r.action === 'clash_sub_create') {
+    if (d.count !== undefined) parts.push(`${d.count} 个节点`)
+    if (d.token_prefix) parts.push(`token ${String(d.token_prefix)}…`)
+    return parts.join(' · ')
+  }
   if (d.permanent) parts.push(r.action === 'extend' ? '转为永久' : '永久')
   if (d.from === 'permanent') parts.push('由永久转限时')
   if (d.hours !== undefined) parts.push(`${d.hours}h`)

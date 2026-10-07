@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   formatBytes,
+  formatCountdown,
   formatDateTime,
   formatExpiry,
   formatRelative,
@@ -83,5 +84,14 @@ describe('formatRemaining / humanDuration', () => {
     expect(formatRemaining(now + 3 * 3600_000 + 20 * min, now)).toBe('剩 3 小时 20 分')
     expect(formatRemaining(now - 2 * 3600_000, now)).toBe('已过期 2 小时')
     expect(formatRemaining(0, now)).toBe('永久')
+  })
+})
+
+describe('formatCountdown（Clash 订阅倒计时）', () => {
+  it('MM:SS；负数按 0', () => {
+    expect(formatCountdown(598_000)).toBe('09:58')
+    expect(formatCountdown(600_000)).toBe('10:00')
+    expect(formatCountdown(5_000)).toBe('00:05')
+    expect(formatCountdown(-1)).toBe('00:00')
   })
 })

@@ -67,3 +67,11 @@ export function humanDuration(ms: number): string {
   if (hours > 0) return mins > 0 ? `${hours} 小时 ${mins} 分` : `${hours} 小时`
   return `${mins} 分`
 }
+
+/** 毫秒 → 倒计时 MM:SS（向下取整到秒，负数按 0） */ 
+export function formatCountdown(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}

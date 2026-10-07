@@ -62,9 +62,26 @@ export interface AuditRecord {
   id: number
   ts: number
   actor: string
-  action: 'create' | 'revoke' | 'extend'
+  action: 'create' | 'revoke' | 'extend' | 'clash_sub_create'
   link_id: string | null
   detail: Record<string, unknown> | null
+}
+
+// ---- Clash 订阅 ----
+
+// POST /api/clash/subscriptions 出参
+export interface ClashSubResult {
+  token: string
+  /** 订阅地址（二维码 / 复制用） */
+  url: string
+  /** clash:// 一键导入链接 */
+  importUrl: string
+  expiresAt: number
+  ttlSeconds: number
+  count: number
+  /** 入参里被忽略（不存在）的链接 id */
+  skipped: string[]
+  nodes: { id: string; name: string }[]
 }
 
 // 分页信封（/connections 与 /audit 共用）

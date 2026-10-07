@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { listLinks, logout, revokeLink } from '../api'
 import { formatBytes, formatDateTime, formatExpiry, formatRemaining } from '../lib/format'
 import type { Link } from '../types'
@@ -7,6 +7,7 @@ import { CopyModal } from './CopyModal'
 import { ActModal } from './ActModal'
 import { LinkDetailModal } from './LinkDetailModal'
 import { AuditModal } from './AuditModal'
+import { ClashSubModal } from './ClashSubModal'
 import { RegionProbeBar } from './RegionProbeBar'
 
 // 主界面（Swiss 极简）：顶部栏 + 表格。
@@ -24,6 +25,7 @@ type ModalState =
   | { kind: 'extend'; link: Link }
   | { kind: 'detail'; link: Link }
   | { kind: 'audit' }
+  | { kind: 'clash' }
   | null
 
 export default function Dashboard() {
@@ -32,12 +34,22 @@ export default function Dashboard() {
   const [error, setError] = useState('')
   const [modal, setModal] = useState<ModalState>(null)
   const [busy, setBusy] = useState<string>('') // 正在操作的行 id
+  // 多选态（Clash 订阅用）：Set 保持勾选顺序（JS Set 迭代 = 插入顺序）。
+  // 只放 state、不塞进链接对象；关闭弹窗后保留勾选。
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const selectedIds = useMemo(() => [...selected], [selected])
 
   const refresh = useCallback(async () => {
     setError('')
     try {
       const data = await listLinks()
       setLinks(data)
+      // 列表变化后收窄勾选：移除已不存在的 id（链接不会被删，但防数据变化后计数失真）
+      const ids = new Set(data.map((l) => l.id))
+      setSelected((prev) => {
+        const next = new Set([...prev].filter((id) => ids.has(id)))
+        return next.size === prev.size ? prev : next
+      })
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -51,6 +63,19 @@ export default function Dashboard() {
 
   function applyUpdate(updated: Link) {
     setLinks((prev) => prev.map((l) => (l.id === updated.id ? updated : l)))
+  }
+
+  function toggleSelected(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function selectAll() {
+    setSelected(new Set(links.map((l) => l.id)))
   }
 
   async function doRevoke(link: Link) {
@@ -79,6 +104,14 @@ export default function Dashboard() {
           <button type="button" className="btn" onClick={() => setModal({ kind: 'audit' })}>
             审计
           </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setModal({ kind: 'clash' })}
+            disabled={selected.size === 0}
+          >
+            生成 Clash 订阅
+          </button>
           <button type="button" className="btn btn-primary" onClick={() => setModal({ kind: 'create' })}>
             生成链接
           </button>
@@ -91,10 +124,26 @@ export default function Dashboard() {
       <main className="content">
         {error && <div className="banner banner-error">{error}</div>}
 
+        <div className="toolbar">
+          <span className="sel-count">已选 {selected.size} 项</span>
+          <button type="button" className="btn btn-sm" onClick={selectAll} disabled={links.length === 0}>
+            全选
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => setSelected(new Set())}
+            disabled={selected.size === 0}
+          >
+            清空
+          </button>
+        </div>
+
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
+                <th className="sel-col" aria-label="选择" />
                 <th>备注</th>
                 <th>状态</th>
                 <th>创建</th>
@@ -106,13 +155,13 @@ export default function Dashboard() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="empty">
+                  <td colSpan={7} className="empty">
                     加载中…
                   </td>
                 </tr>
               ) : links.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="empty">
+                  <td colSpan={7} className="empty">
                     暂无链接
                   </td>
                 </tr>
@@ -122,6 +171,15 @@ export default function Dashboard() {
                   const isBusy = busy === l.id
                   return (
                     <tr key={l.id} className={active ? '' : 'dim'}>
+                      <td className="sel-col">
+                        <input
+                          type="checkbox"
+                          aria-label={`选择 ${l.note || l.id}`}
+                          checked={selected.has(l.id)}
+                          onChange={() => toggleSelected(l.id)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </td>
                       <td className="note-cell">
                         <span className="note-text">{l.note || '—'}</span>
                         <span className="mono id-sub">{l.id}</span>
@@ -205,6 +263,9 @@ export default function Dashboard() {
         <LinkDetailModal link={modal.link} onClose={() => setModal(null)} />
       )}
       {modal?.kind === 'audit' && <AuditModal onClose={() => setModal(null)} />}
+      {modal?.kind === 'clash' && (
+        <ClashSubModal linkIds={selectedIds} onClose={() => setModal(null)} />
+      )}
     </div>
   )
 }
