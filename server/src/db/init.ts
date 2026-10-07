@@ -77,6 +77,21 @@ export function initSchema(db: DbLike = getDb()): void {
   `)
   db.exec('CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts)')
 
+  // Clash 订阅（多选节点 → 10 分钟有效订阅地址）：
+  //   token 不可猜（crypto.randomBytes(32) base64url，见 services/clashService.ts）；
+  //   link_ids 为 JSON 数组，按勾选顺序保存；运行时按当前链接状态重新生成，故不存快照。
+  //   过期行由 scheduler.cleanupClashSubs() 定期删除（挂在每小时连接清理后）。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS clash_subs (
+      token      TEXT PRIMARY KEY,
+      link_ids   TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_by TEXT NOT NULL
+    )
+  `)
+  db.exec('CREATE INDEX IF NOT EXISTS idx_clash_subs_expires ON clash_subs(expires_at)')
+
   // 自带账号体系（AUTH_MODE=builtin，默认）：users + sessions。
   //   users.password_hash 格式 scrypt$<saltHex>$<hashHex>（node:crypto scrypt，零新依赖）
   //   sessions.expires_at 为 ISO 8601 UTC 文本，命中的会话滑动续期

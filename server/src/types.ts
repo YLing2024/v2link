@@ -105,6 +105,15 @@ export interface AuditView extends Omit<AuditRow, 'detail'> {
   detail: AuditDetail
 }
 
-export type AuditAction = 'create' | 'revoke' | 'extend'
+export type AuditAction = 'create' | 'revoke' | 'extend' | 'clash_sub_create'
 
 export type AuditDetail = Record<string, unknown> | null
+
+// clash_subs 行（多选节点生成的临时订阅；link_ids 为 JSON 数组，按勾选顺序）
+export interface ClashSubRow {
+  token: string
+  link_ids: string
+  created_at: number
+  expires_at: number
+  created_by: string
+}

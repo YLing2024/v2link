@@ -44,6 +44,12 @@ const envSchema = z.object({
   // 探测周期（秒，默认 300 = 每 5 分钟一轮）
   REGION_PROBE_INTERVAL_S: z.coerce.number().int().min(60).max(3600).default(300),
   DB_PATH: z.string().trim().optional(),
+  // ---- Clash 订阅 ----
+  // 订阅地址有效期（秒，默认 600 = 10 分钟）。到期后 GET 返回 404。
+  CLASH_SUB_TTL_S: z.coerce.number().int().min(1).max(24 * 3600).default(600),
+  // 订阅地址前缀（生成 url 用；占位，绝不硬编码真实域名）。
+  // 生产应为对外可访问的 https 源，例如 nginx 反代的 v2.<自建域名>。
+  PUBLIC_BASE_URL: z.string().trim().default('https://v2.example.com'),
   // ---- 管理端认证模式 ----
   //   builtin（默认）：自带账号 + 会话；sso：关掉自带口令，身份只看 X-Auth-User。
   //   未设置 / 取值非法 → 一律按 builtin（catch 兜底）。
@@ -93,6 +99,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     serverRoot,
     regionProbes: p.REGION_PROBES,
     regionProbeIntervalMs: p.REGION_PROBE_INTERVAL_S * 1000,
+    clashSubTtlMs: p.CLASH_SUB_TTL_S * 1000,
+    publicBaseUrl: p.PUBLIC_BASE_URL,
     authMode: p.AUTH_MODE,
     adminUser: p.V2LINK_ADMIN_USER,
     adminPassword: p.V2LINK_ADMIN_PASSWORD,
@@ -185,6 +193,10 @@ export interface Config {
   regionProbes: string | undefined
   /** 探测周期（默认 300s = 每 5 分钟一轮） */
   regionProbeIntervalMs: number
+  /** Clash 订阅地址有效期（毫秒，默认 600s） */
+  clashSubTtlMs: number
+  /** Clash 订阅地址前缀（PUBLIC_BASE_URL；占位默认 https://v2.example.com） */
+  publicBaseUrl: string
   /** 认证模式：builtin（自带账号，默认）/ sso（身份只看 X-Auth-User） */
   authMode: AuthMode
   /** 首次启动创建的管理员用户名 */
