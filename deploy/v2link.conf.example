@@ -34,6 +34,17 @@ server {
     }
 
     # ---- 控制面 API：全部交给网关，鉴权通过后由网关反代并注入 X-Auth-User ----
+    # Clash 订阅抓取：**必须公开**（token 即凭据，Clash 抓取时不带 cookie）
+    # 红线：这里不得经过认证网关，否则扫码/导入时会被 SSO 拦成 302
+    # ^~ 前缀优先于下面的 location /api/，故必须排在它之前
+    location ^~ /api/clash/subscriptions/ {
+        proxy_pass http://127.0.0.1:7897;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     location /api/ {
         proxy_pass http://127.0.0.1:18920;
         proxy_http_version 1.1;

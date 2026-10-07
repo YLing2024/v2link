@@ -59,7 +59,9 @@ systemctl restart v2link        # 控制面
 systemctl restart xray          # 只在改 deploy/xray.config.json 时需要
 ```
 
-- nginx：`v2.<自建域名>`（`deploy/v2link.conf` 是参考）。`/api/` 认证模式二选一：`builtin`（默认，控制面自带账号）或 `sso`（交给前置认证，注入 `X-Auth-User` 后反代控制面）。配置里**不再有** `auth_request` / 探针 / `/auth-check`。
+- nginx：`v2.<自建域名>`（`deploy/v2link.conf` 是参考）。
+- **`/api/clash/subscriptions/<token>` 在 nginx 里必须走「直连控制面」的公开 location（`location ^~ /api/clash/subscriptions/`，排在 `location /api/` 之前）**：Clash 抓订阅时不带 cookie，经认证网关会被 SSO 拦成 302。token 即凭据。
+`/api/` 认证模式二选一：`builtin`（默认，控制面自带账号）或 `sso`（交给前置认证，注入 `X-Auth-User` 后反代控制面）。配置里**不再有** `auth_request` / 探针 / `/auth-check`。
 - xray access log → `/var/log/xray/access.log`，轮转见 `deploy/xray-logrotate`（与控制面 7 天保留期对齐）。
 - 若配置了镜像域名，改 nginx 时几个域名体系要同步。
 
