@@ -177,6 +177,26 @@ describe('GET /api/audit', () => {
   })
 })
 
+describe('DELETE /api/links/:id（删除链接）', () => {
+  it('成功 → 200 { ok: true }，列表不再含该链接，审计多一条 link_delete', async () => {
+    const { app, link, monitor } = await makeApp()
+    const res = await request(app).delete(`/api/links/${link.id}`)
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ ok: true })
+    const list = await request(app).get('/api/links')
+    expect((list.body.data as { id: string }[]).some((l) => l.id === link.id)).toBe(false)
+    const audit = monitor.listAudit({ limit: 10, offset: 0 }).rows
+    expect(audit.some((r) => r.action === 'link_delete' && r.link_id === link.id)).toBe(true)
+  })
+
+  it('不存在的 id → 404', async () => {
+    const { app } = await makeApp()
+    const res = await request(app).delete('/api/links/nope')
+    expect(res.status).toBe(404)
+    expect(res.body).toMatchObject({ ok: false, error: '链接不存在' })
+  })
+})
+
 describe('POST /api/links/:id/extend（需求文档 需求 1）', () => {
   it('expiresAt 绝对时刻 → 精确设置；过期时间返回毫秒时间戳', async () => {
     const { app, link } = await makeApp()

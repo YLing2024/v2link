@@ -166,6 +166,11 @@ export function revokeLink(id: string): Promise<Link> {
   return request<Link>(`/api/links/${encodeURIComponent(id)}/revoke`, { method: 'POST' })
 }
 
+/** 删除链接（账本行 + 采样；connections 保留）。成功回 { ok: true }（无 data）。 */
+export function deleteLink(id: string): Promise<void> {
+  return request<void>(`/api/links/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
 export function extendLink(
   id: string,
   body: { expiresAt?: number; hours?: number; permanent?: boolean },

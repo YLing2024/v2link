@@ -62,7 +62,7 @@ export interface AuditRecord {
   id: number
   ts: number
   actor: string
-  action: 'create' | 'revoke' | 'extend' | 'clash_sub_create'
+  action: 'create' | 'revoke' | 'extend' | 'link_delete' | 'clash_sub_create'
   link_id: string | null
   detail: Record<string, unknown> | null
 }

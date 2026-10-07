@@ -31,6 +31,8 @@ export interface LinksRepo {
   byId(id: string): LinkRow | undefined
   /** 返回新行（须在服务层事务内使用） */
   insert(row: LinkRow): void
+  /** 删账本行（须在服务层事务内使用）；返回实际删除行数（0 = 本就不存在） */
+  remove(id: string): number
   updateStatus(id: string, status: LinkStatus, revokedAt: number | null): void
   addTraffic(id: string, upDelta: number, downDelta: number): void
   /** 返回上一状态；用于「状态机合法性」校验（active 才允许转移/延长） */
@@ -53,6 +55,7 @@ function statements(db: Database): LinksRepo {
      VALUES (@id, @uuid, @email, @note, @alias, @up_bytes, @down_bytes, @created_at, @expires_at, @revoked_at, @status)`,
   )
   const stmtById = db.prepare('SELECT * FROM links WHERE id = ?')
+  const stmtDelete = db.prepare('DELETE FROM links WHERE id = ?')
   const stmtStatus = db.prepare('SELECT status FROM links WHERE id = ?')
   const stmtUpdateStatus = db.prepare('UPDATE links SET status = ?, revoked_at = ? WHERE id = ?')
   const stmtAddTraffic = db.prepare(
@@ -87,6 +90,9 @@ function statements(db: Database): LinksRepo {
     },
     insert(row) {
       stmtInsert.run({ ...row })
+    },
+    remove(id) {
+      return stmtDelete.run(id).changes
     },
     updateStatus(id, status, revokedAt) {
       stmtUpdateStatus.run(status, revokedAt, id)

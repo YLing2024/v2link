@@ -45,6 +45,8 @@ export interface MonitoringRepo {
   listSamples(q: SampleQuery): TrafficSampleRow[]
   insertSamples(rows: { link_id: string; ts: number; up_delta: number; down_delta: number }[]): void
   deleteSamplesBefore(ts: number): number
+  /** 删某条链接的全部采样（删除链接时连带清理）；返回删除行数 */
+  deleteSamplesByLink(linkId: string): number
 
   listConnections(q: ConnectionQuery & { limit: number; offset: number }): Page<ConnectionRow>
   insertConnections(rows: {
@@ -122,6 +124,7 @@ function statements(db: Database): MonitoringRepo {
      VALUES (@link_id, @ts, @up_delta, @down_delta)`,
   )
   const stmtDeleteSamples = db.prepare('DELETE FROM traffic_samples WHERE ts < ?')
+  const stmtDeleteSamplesByLink = db.prepare('DELETE FROM traffic_samples WHERE link_id = ?')
 
   // ---- connections ----
   const stmtInsertConn = db.prepare(
@@ -154,6 +157,10 @@ function statements(db: Database): MonitoringRepo {
 
     deleteSamplesBefore(ts) {
       return stmtDeleteSamples.run(ts).changes
+    },
+
+    deleteSamplesByLink(linkId) {
+      return stmtDeleteSamplesByLink.run(linkId).changes
     },
 
     listConnections({ link_id, email, hostPrefix, from, to, limit, offset }) {

@@ -3,15 +3,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Dashboard 多选：未选禁用、勾选计数、全选/清空、生成订阅按勾选顺序传 linkIds。
 
-const { listLinksMock, createClashSubscriptionMock } = vi.hoisted(() => ({
+const { listLinksMock, createClashSubscriptionMock, deleteLinkMock } = vi.hoisted(() => ({
   listLinksMock: vi.fn(),
   createClashSubscriptionMock: vi.fn(),
+  deleteLinkMock: vi.fn(),
 }))
 
 vi.mock('../api', () => ({
   listLinks: listLinksMock,
   logout: vi.fn(),
   revokeLink: vi.fn(),
+  deleteLink: deleteLinkMock,
   createLink: vi.fn(),
   extendLink: vi.fn(),
   linkTraffic: vi.fn(),
@@ -59,6 +61,7 @@ function subResult(): ClashSubResult {
 beforeEach(() => {
   listLinksMock.mockReset()
   createClashSubscriptionMock.mockReset()
+  deleteLinkMock.mockReset()
 })
 
 describe('Dashboard 多选 → Clash 订阅', () => {
@@ -95,5 +98,34 @@ describe('Dashboard 多选 → Clash 订阅', () => {
     await waitFor(() =>
       expect(createClashSubscriptionMock).toHaveBeenCalledWith(['lk_b', 'lk_a']),
     )
+  })
+})
+
+describe('Dashboard 删除链接', () => {
+  it('active：确认文案提示断开连接；确认后调用 deleteLink 并刷新列表', async () => {
+    listLinksMock.mockResolvedValue([link('lk_a', '节点甲')])
+    deleteLinkMock.mockResolvedValue(undefined)
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<Dashboard />)
+    await screen.findByText('节点甲')
+
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    expect(confirmSpy).toHaveBeenCalledWith(
+      '删除「节点甲」？会同时断开其正在使用的连接，且不可恢复。',
+    )
+    await waitFor(() => expect(deleteLinkMock).toHaveBeenCalledWith('lk_a'))
+    confirmSpy.mockRestore()
+  })
+
+  it('已吊销：确认文案只说不再出现在列表；取消则不调用', async () => {
+    listLinksMock.mockResolvedValue([{ ...link('lk_b', '节点乙'), status: 'revoked' as const }])
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<Dashboard />)
+    await screen.findByText('节点乙')
+
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    expect(confirmSpy).toHaveBeenCalledWith('删除「节点乙」？删除后不再出现在列表中。')
+    expect(deleteLinkMock).not.toHaveBeenCalled()
+    confirmSpy.mockRestore()
   })
 })

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { listLinks, logout, revokeLink } from '../api'
+import { deleteLink, listLinks, logout, revokeLink } from '../api'
 import { formatBytes, formatDateTime, formatExpiry, formatRemaining } from '../lib/format'
 import type { Link } from '../types'
 import { CreateModal } from './CreateModal'
@@ -44,7 +44,7 @@ export default function Dashboard() {
     try {
       const data = await listLinks()
       setLinks(data)
-      // 列表变化后收窄勾选：移除已不存在的 id（链接不会被删，但防数据变化后计数失真）
+      // 列表变化后收窄勾选：移除已删除的 id（删除功能会真正删掉链接，避免勾选计数失真）
       const ids = new Set(data.map((l) => l.id))
       setSelected((prev) => {
         const next = new Set([...prev].filter((id) => ids.has(id)))
@@ -83,6 +83,24 @@ export default function Dashboard() {
     setBusy(link.id)
     try {
       applyUpdate(await revokeLink(link.id))
+    } catch (e) {
+      window.alert((e as Error).message)
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function doDelete(link: Link) {
+    const name = link.alias || link.note || link.id
+    const msg =
+      link.status === 'active'
+        ? `删除「${name}」？会同时断开其正在使用的连接，且不可恢复。`
+        : `删除「${name}」？删除后不再出现在列表中。`
+    if (!window.confirm(msg)) return
+    setBusy(link.id)
+    try {
+      await deleteLink(link.id)
+      await refresh()
     } catch (e) {
       window.alert((e as Error).message)
     } finally {
@@ -235,6 +253,14 @@ export default function Dashboard() {
                               </button>
                             </>
                           )}
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-danger"
+                            onClick={() => void doDelete(l)}
+                            disabled={isBusy}
+                          >
+                            删除
+                          </button>
                         </div>
                       </td>
                     </tr>

@@ -3,7 +3,7 @@ import { toView, type LinksRepo } from '../db/linksRepo.js'
 import type { MonitoringRepo } from '../db/monitoringRepo.js'
 import { newLinkId, randomUuid } from '../lib/id.js'
 import { isPermanentExpiry, PERMANENT_EXPIRES_AT } from '../lib/expiry.js'
-import type { AuditAction, AuditDetail, CreateLinkInput, LinkRow, LinkView } from '../types.js'
+import type { AuditAction, AuditDetail, CreateLinkInput, LinkRow, LinkStatus, LinkView } from '../types.js'
 import type { XrayClient } from './xrayClient.js'
 
 // 业务编排：SQLite 账本为权威，xray 数据面为镜像。约定（REQUIREMENTS.md §5）：
@@ -47,6 +47,13 @@ export function apiError(status: number, message: string): HttpError {
 /** 绝对过期时刻允许的最大跨度（now ~ now+365 天；显式绝对时间不设小时上限，超出拒绝） */
 const MAX_EXPIRE_ABS_DAYS = 365
 
+/** 状态中文标签（审计 detail 摘要用；与前端 Dashboard STATUS_LABEL 对齐） */
+const STATUS_LABEL: Record<LinkStatus, string> = {
+  active: '使用中',
+  expired: '已过期',
+  revoked: '已吊销',
+}
+
 /** 业务上限（默认值）来自 config，组装时注入——服务层不碰全局 config，利于测试 */
 export interface LinkLimits {
   defaultHours: number
@@ -58,6 +65,7 @@ export interface LinkService {
   create(input: CreateLinkInput, actor?: string): Promise<LinkView>
   revoke(id: string, actor?: string): Promise<LinkView>
   extend(id: string, input: ExtendInput, actor?: string): Promise<LinkView>
+  remove(id: string, actor?: string): Promise<void>
 }
 
 interface Deps {
@@ -299,11 +307,43 @@ export function createLinkService(deps: Deps): LinkService {
     return viewById(repo, id)
   }
 
+  // remove：删除链接（账本行 + 其 traffic_samples）。
+  //   - 不存在 → 404。
+  //   - 先尽力 rmu 删数据面用户（幂等：不存在返 0 视为成功，与 addUser 策略一致）；
+  //     xray 不可达等异常 → 不阻塞删除，仅记日志（用户点了删除就真删掉）。
+  //   - connections 保留（连接追溯历史，按既有 7 天保留期自然清理）。
+  //   - 审计 action=link_delete，detail 记 id/alias/note/状态摘要，不落 uuid 全文。
+  async function remove(id: string, actor?: string): Promise<void> {
+    const row = repo.byId(id)
+    if (!row) throw apiError(404, '链接不存在')
+    // ① 先尽力删数据面用户；失败不阻塞
+    try {
+      await xray.removeUser(id)
+    } catch (e) {
+      console.error(`[links] remove: rmu 失败 id=${id}: ${(e as Error).message}`)
+    }
+    // ② 删账本：traffic_samples + links 行；审计同事务写入
+    const statusLabel = STATUS_LABEL[row.status]
+    const detail: AuditDetail = {
+      id,
+      alias: row.alias || null,
+      note: row.note || null,
+      status: row.status,
+      text: `删除 ${id}（${statusLabel}）`,
+    }
+    db.transaction(() => {
+      monitor.deleteSamplesByLink(id)
+      repo.remove(id)
+      audit('link_delete', id, detail, actor)
+    })()
+  }
+
   return {
     list: () => repo.list(),
     create,
     revoke,
     extend,
+    remove,
   }
 }
 

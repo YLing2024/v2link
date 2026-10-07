@@ -433,3 +433,55 @@ describe('HttpError', () => {
     expect(e.message).toBe('x')
   })
 })
+
+// remove：删除链接（账本行 + traffic_samples；connections 保留；审计 link_delete）
+describe('remove', () => {
+  it('不存在的链接 → 404，且不写审计', async () => {
+    const { svc, monitor } = makeService()
+    await expect(svc.remove('nope')).rejects.toMatchObject({ status: 404, message: '链接不存在' })
+    expect(monitor.listAudit({ limit: 10, offset: 0 }).total).toBe(0)
+  })
+
+  it('正常删除：links 行与其 traffic_samples 一起删，审计写 link_delete（不落 uuid）', async () => {
+    const { svc, repo, monitor, db } = makeService({ now: () => 1_700_000_000_000 })
+    const link = await svc.create({ note: '朋友', alias: '节点A', hours: 2 }, 'ops@example')
+    const other = await svc.create({ note: '保留', hours: 2 })
+    monitor.insertSamples([
+      { link_id: link.id, ts: 1_700_000_001_000, up_delta: 5, down_delta: 9 },
+      { link_id: other.id, ts: 1_700_000_001_000, up_delta: 1, down_delta: 2 },
+    ])
+    // connections 属追溯历史，删除时保留
+    monitor.insertConnections([
+      { link_id: link.id, email: link.id, ts: 1_700_000_001_000, host: 'a.example', port: 443, up_bytes: 1, down_bytes: 2, duration_ms: 10 },
+    ])
+
+    await svc.remove(link.id, 'ops@example')
+
+    expect(repo.byId(link.id)).toBeUndefined()
+    expect(repo.byId(other.id)).toBeDefined()
+    expect(db.prepare('SELECT COUNT(*) AS n FROM traffic_samples WHERE link_id = ?').get(link.id)).toEqual({ n: 0 })
+    expect(db.prepare('SELECT COUNT(*) AS n FROM traffic_samples WHERE link_id = ?').get(other.id)).toEqual({ n: 1 })
+    expect(db.prepare('SELECT COUNT(*) AS n FROM connections WHERE link_id = ?').get(link.id)).toEqual({ n: 1 })
+
+    const row = monitor.listAudit({ limit: 10, offset: 0 }).rows.find((r) => r.action === 'link_delete')!
+    expect(row).toMatchObject({ actor: 'ops@example', action: 'link_delete', link_id: link.id })
+    expect(row.detail).toMatchObject({ id: link.id, alias: '节点A', note: '朋友', status: 'active' })
+    expect((row.detail as Record<string, unknown>).text).toBe(`删除 ${link.id}（使用中）`)
+    // 不记 uuid 全文
+    expect(JSON.stringify(row.detail)).not.toContain(link.uuid)
+  })
+
+  it('xray 不可达 → 仍删除成功，且记日志', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      const xray = stubXray({ removeUser: vi.fn(async () => { throw new Error('conn refused') }) })
+      const { svc, repo } = makeService({ xray })
+      const link = await svc.create({})
+      await expect(svc.remove(link.id)).resolves.toBeUndefined()
+      expect(repo.byId(link.id)).toBeUndefined()
+      expect(spy).toHaveBeenCalledWith(expect.stringContaining('[links] remove: rmu 失败'))
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})

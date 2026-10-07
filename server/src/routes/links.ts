@@ -75,6 +75,16 @@ export function createLinksRouter(
     }
   })
 
+  // 删除链接（账本行 + traffic_samples；connections 保留）。幂等删数据面用户，成功回 { ok: true }。
+  router.delete('/:id', async (req, res) => {
+    try {
+      await service.remove(req.params.id, req.authUser)
+      res.json({ ok: true })
+    } catch (e) {
+      sendError(res, e)
+    }
+  })
+
   router.post('/:id/extend', async (req, res) => {
     try {
       const body = (req.body ?? {}) as Record<string, unknown>

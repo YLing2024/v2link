@@ -776,6 +776,12 @@ button {
   color: var(--danger);
 }
 
+.audit-link_delete {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 .audit-detail {
   max-width: 300px;
   overflow: hidden;

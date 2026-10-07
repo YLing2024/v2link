@@ -105,7 +105,7 @@ export interface AuditView extends Omit<AuditRow, 'detail'> {
   detail: AuditDetail
 }
 
-export type AuditAction = 'create' | 'revoke' | 'extend' | 'clash_sub_create'
+export type AuditAction = 'create' | 'revoke' | 'extend' | 'link_delete' | 'clash_sub_create'
 
 export type AuditDetail = Record<string, unknown> | null
 
