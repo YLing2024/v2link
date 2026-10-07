@@ -1,6 +1,7 @@
 import type { Database } from 'better-sqlite3'
 import type { LinksRepo } from '../db/linksRepo.js'
 import type { MonitoringRepo } from '../db/monitoringRepo.js'
+import type { ClashSubRepo } from '../db/clashSubRepo.js'
 import type { XrayClient } from './xrayClient.js'
 import type { RegionProbeService } from './regionProbe.js'
 import type { ReconcileService } from './reconcile.js'
@@ -14,6 +15,7 @@ import { parseStatsQuery } from '../lib/xrayStats.js'
 //   · xray 一致性同步：周期 reconcile（账本应有效 → adu；应失效 → rmu），防 xray 重启后静默丢用户
 //     （需求文档 R2/R3；启动即跑一轮，默认周期 60s，0 = 只启动跑一次）
 //   · 保留清理：connections 7 天滚动（每小时）；traffic_samples 30 天（每天）——防无限增长
+//   · Clash 订阅清理：过期订阅随每小时连接清理一并删除（clash_subs.expires_at <= now）
 //
 // 首拉语义（REQUIREMENTS.md §3.2 关注点）：xray stats 是易失计数器，账本权威在 SQLite。
 //   进程重启后第一次 statsquery 若带 -reset，会把「停机期间的累计流量」一次性清零——
@@ -48,6 +50,8 @@ export interface SchedulerOptions {
   reconcile?: ReconcileService | null
   /** 一致性同步周期（ms）。缺省 60000；0 = 挂上但不在定时器轮询（启动仍同步一次，同地区探测惯例） */
   xrayReconcileIntervalMs?: number
+  /** Clash 订阅仓库（过期订阅清理）。缺省 = 不清理。 */
+  clashSubs?: Pick<ClashSubRepo, 'deleteExpired'>
 }
 
 export class Scheduler {
@@ -73,6 +77,7 @@ export class Scheduler {
   private readonly reconcile: ReconcileService | null
   private readonly xrayReconcileIntervalMs: number
   private reconcileTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly clashSubs: Pick<ClashSubRepo, 'deleteExpired'> | null
   private running = false
   /** 首次采集前置位：true = 未预热（见类头「首拉语义」注释） */
   private firstLedger = true
@@ -94,6 +99,7 @@ export class Scheduler {
     this.regionProbeIntervalMs = opts.regionProbeIntervalMs ?? 300_000
     this.reconcile = opts.reconcile ?? null
     this.xrayReconcileIntervalMs = opts.xrayReconcileIntervalMs ?? 60_000
+    this.clashSubs = opts.clashSubs ?? null
   }
 
   async start(): Promise<void> {
@@ -108,7 +114,11 @@ export class Scheduler {
     }
     this.expireTimer = setInterval(() => void this.runExpire(), this.expireIntervalMs)
     this.ledgerTimer = setInterval(() => void this.runLedger(), this.ledgerIntervalMs)
-    this.connCleanupTimer = setInterval(() => void this.cleanupConnections(), this.connCleanupIntervalMs)
+    this.connCleanupTimer = setInterval(() => {
+      void this.cleanupConnections()
+      // Clash 订阅清理跟在每小时连接清理后（需求：挂进 scheduler，不裸起 setInterval）
+      void this.cleanupClashSubs()
+    }, this.connCleanupIntervalMs)
     this.sampleCleanupTimer = setInterval(
       () => void this.cleanupSamples(),
       this.sampleCleanupIntervalMs,
@@ -116,6 +126,7 @@ export class Scheduler {
     // 启动即清一次旧数据（service 长时间运行、定时器对齐等场景），保持留存水位
     void this.cleanupConnections()
     void this.cleanupSamples()
+    void this.cleanupClashSubs()
     // 地区连通性探测：启动即跑首轮（服务刚启动未跑过 → 立即跑，见需求 2）
     if (this.regionProbe) {
       void this.runRegionProbes()
@@ -221,6 +232,14 @@ export class Scheduler {
     const before = this.now() - this.sampleRetentionMs
     const n = this.monitor.deleteSamplesBefore(before)
     if (n > 0) this.log('清理过期流量采样', { olderThanMs: before, removed: n })
+    return n
+  }
+
+  /** 过期 Clash 订阅清理（跟随每小时连接清理）。返回删除行数。 */
+  cleanupClashSubs(): number {
+    if (!this.clashSubs) return 0
+    const n = this.clashSubs.deleteExpired(this.now())
+    if (n > 0) this.log('清理过期 Clash 订阅', { removed: n })
     return n
   }
 

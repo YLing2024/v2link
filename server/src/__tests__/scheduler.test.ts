@@ -46,6 +46,7 @@ function makeScheduler(overrides?: {
   regionProbe?: RegionProbeService
   reconcile?: ReconcileService
   xrayReconcileIntervalMs?: number
+  clashSubs?: { deleteExpired(now: number): number }
 }) {
   const db = makeTestDb()
   const repo = makeRepo(db)
@@ -58,6 +59,7 @@ function makeScheduler(overrides?: {
     regionProbe: overrides?.regionProbe,
     reconcile: overrides?.reconcile,
     xrayReconcileIntervalMs: overrides?.xrayReconcileIntervalMs,
+    clashSubs: overrides?.clashSubs,
     logger: () => undefined,
     now: overrides?.now ?? (() => 1_800_000_000_000),
     expireIntervalMs: overrides?.expireIntervalMs ?? 15_000,
@@ -239,6 +241,20 @@ describe('保留清理（A/B 滚动）', () => {
     expect(removed).toBe(1)
     const left = db.prepare('SELECT COUNT(*) AS n FROM traffic_samples').get() as { n: number }
     expect(left.n).toBe(1)
+  })
+})
+
+describe('Clash 订阅清理', () => {
+  it('cleanupClashSubs 用 now 调 deleteExpired 并返回删除数', () => {
+    const deleteExpired = vi.fn((_now: number) => 3)
+    const { sched } = makeScheduler({ clashSubs: { deleteExpired } })
+    expect(sched.cleanupClashSubs()).toBe(3)
+    expect(deleteExpired).toHaveBeenCalledWith(1_800_000_000_000)
+  })
+
+  it('未挂 clashSubs 时为空操作（不抛）', () => {
+    const { sched } = makeScheduler({})
+    expect(sched.cleanupClashSubs()).toBe(0)
   })
 })
 
