@@ -4,14 +4,17 @@ import { getDb, closeDb } from './db/connection.js'
 import { initSchema } from './db/init.js'
 import { createLinksRepo } from './db/linksRepo.js'
 import { createMonitoringRepo } from './db/monitoringRepo.js'
+import { createClashSubRepo } from './db/clashSubRepo.js'
 import { createApp } from './app.js'
 import { createAccountService } from './services/accountService.js'
 import { xrayClient } from './services/xrayClient.js'
 import { createLinkService } from './services/linkService.js'
+import { createClashService } from './services/clashService.js'
 import { Scheduler } from './services/scheduler.js'
 import { createRegionProbeService } from './services/regionProbe.js'
 import { ReconcileService } from './services/reconcile.js'
 import { AccessLogTailer } from './lib/accessLogTailer.js'
+import { publicHost, publicPath, publicSni } from './lib/vless.js'
 
 // 入口：config → DB schema → repo/service → scheduler → tailer → app/listen
 // 后台任务在 listen 成功后 start（首拉预热见 Scheduler 类头；tailer 基线见类头）。
@@ -20,6 +23,7 @@ const db = getDb()
 initSchema(db)
 const repo = createLinksRepo(db)
 const monitor = createMonitoringRepo(db)
+const clashSubs = createClashSubRepo(db)
 const service = createLinkService({
   db,
   repo,
@@ -29,6 +33,18 @@ const service = createLinkService({
     defaultHours: config.defaultHours,
     maxHours: config.maxHours,
   },
+})
+
+// Clash 订阅（多选节点 → 临时订阅地址）：host/sni/path 注入，服务层不直接读环境变量
+const clash = createClashService({
+  repo,
+  clashSubs,
+  monitor,
+  publicBaseUrl: config.publicBaseUrl,
+  ttlMs: config.clashSubTtlMs,
+  host: publicHost(),
+  sni: publicSni(),
+  path: publicPath(),
 })
 
 // 地区连通性监控（地区连通性监控）：端点来自配置（默认内置 / REGION_PROBES 覆盖）
@@ -69,6 +85,7 @@ const scheduler = new Scheduler({
   sampleCleanupIntervalMs: config.sampleCleanupIntervalMs,
   connRetentionMs: config.connRetentionMs,
   sampleRetentionMs: config.sampleRetentionMs,
+  clashSubs,
 })
 
 // access log 采集器：email → links.id 关联；落库攒批在 tailer 内部做（一事务 100 行）
@@ -91,6 +108,7 @@ const app = createApp(
     mode: config.authMode,
     accounts,
   },
+  clash,
 )
 const server = app.listen(config.port, config.host, () => {
   console.log(`v2link 控制面已启动: http://${config.host}:${config.port}`)

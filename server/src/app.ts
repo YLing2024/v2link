@@ -8,10 +8,12 @@ import { createLinksRouter } from './routes/links.js'
 import { createAuditRouter } from './routes/audit.js'
 import { createHealthRouter } from './routes/health.js'
 import { createRegionsRouter } from './routes/regions.js'
+import { createClashRouter } from './routes/clash.js'
 import type { MonitoringRepo } from './db/monitoringRepo.js'
 import type { LinkService } from './services/linkService.js'
 import type { RegionProbeService } from './services/regionProbe.js'
 import type { ReconcileService } from './services/reconcile.js'
+import type { ClashService } from './services/clashService.js'
 
 // Express app 组装：JSON 解析 → /api/healthz（无鉴权）→ /api 认证入口（auth-mode 免鉴权；
 // builtin 走自带账号会话 / sso 只读前置认证注入的 X-Auth-User，见 middleware/auth.ts）。
@@ -38,6 +40,7 @@ export function createApp(
   probe?: RegionProbeService,
   reconcile?: ReconcileService,
   auth: AuthDeps = defaultAuthDeps(),
+  clash?: ClashService,
 ): Express {
   const app = express()
   app.disable('x-powered-by')
@@ -50,6 +53,10 @@ export function createApp(
 
   // 认证入口（auth-mode 免鉴权；login/logout/me 见 routes/auth.ts）——必须在鉴权中间件之前
   app.use('/api', createAuthRouter(auth))
+
+  // Clash 订阅抓取免鉴权（token 即凭据，Clash 抓取不带 cookie）：也必须挂在业务鉴权中间件之前。
+  // POST /subscriptions 在本路由内自带 authRequired，行为与 /api/links* 一致。
+  if (clash) app.use('/api/clash', createClashRouter(clash, createAuthMiddleware(auth)))
 
   // 业务 API：builtin 校验会话 / sso 读 X-Auth-User（缺失 401）
   app.use('/api', createAuthMiddleware(auth))
